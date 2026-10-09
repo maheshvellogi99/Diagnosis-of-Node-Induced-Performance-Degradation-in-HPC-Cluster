@@ -1,0 +1,57 @@
+# Phase 0 — setup and data check (PLAN.md §9 Phase 0, §3.1, §4).
+seed: 0
+
+raw_dir: data/raw
+checksums_file: data/raw/CHECKSUMS.txt
+
+# Raw files and, where the publisher gives one, the published MD5 (verified before use).
+raw_files:
+  eagle/eagle_data.parquet:
+    published_md5: null            # OEDI 5860 page: none recorded locally
+  pm100/job_table.parquet:
+    published_md5: cf85f171a5ed5ff1d951d93f9bcbc6ef   # Zenodo 10127767, given by Mahesh 9 Oct 2026
+
+eagle:
+  raw: data/raw/eagle/eagle_data.parquet
+  out_jobs: data/processed/jobs_eagle.parquet
+
+pm100:
+  raw: data/raw/pm100/job_table.parquet
+  out_jobs: data/processed/jobs_pm100.parquet
+  out_job_nodes: data/processed/job_nodes_pm100.parquet
+  licence: "Creative Commons Attribution 4.0 International (source: https://zenodo.org/records/10127767, checked 9 Oct 2026 by Mahesh)"
+
+profile:
+  # runtime quantiles reported in the data cards
+  quantiles: [0.01, 0.10, 0.25, 0.50, 0.75, 0.90, 0.99]
+  top_users: 10
+
+# Expected Eagle facts, PLAN.md §2.1 F1–F5, with the exact definitions given by Mahesh (9 Oct 2026).
+# Fractions are compared after rounding to the number of decimals in `decimals`.
+eagle_facts:
+  F1_rows: 11030377
+  F1_submit_min_date: "2018-11-14"
+  F1_submit_max_date: "2023-02-22"
+  F1_users: 936
+  F1_partitions: 42
+  F2_columns: [job_id, user, account, partition, qos, wallclock_req, nodes_req, processors_req,
+               gpus_req, mem_req, submit_time, start_time, end_time, run_time, state, name,
+               work_dir, submit_line]
+  F3_states:
+    COMPLETED: 7390586
+    CANCELLED: 1813244
+    FAILED: 975478
+    TIMEOUT: 803002
+    OUT_OF_MEMORY: 20400
+    PENDING: 14646
+    NODE_FAIL: 12088
+    RUNNING: 933
+  F4_runtime_matches_end_minus_start: {value: 0.99965, decimals: 5}   # COMPLETED, |end-start-run_time| <= 1 s
+  F4_runtime_gt_wallclock: {value: 0.000159, decimals: 6}            # COMPLETED, run_time > wallclock_req
+  F4_wallclock_null_rows: 107                                         # full file
+  F5_completed_timeout_rows: 8193588
+  F5_span_days: 1560                       # (max submit - min submit).days over COMPLETED+TIMEOUT
+  F5_jobs_per_day: {value: 5252, decimals: 0}
+  F5_median_run_time_s: 992                # COMPLETED+TIMEOUT
+  F5_one_node_frac_completed: {value: 0.91327, decimals: 5}           # COMPLETED only, nodes_req == 1
+  F5_lt30s_frac: {value: 0.101, decimals: 3}                          # COMPLETED+TIMEOUT, run_time < 30

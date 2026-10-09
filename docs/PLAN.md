@@ -1,0 +1,595 @@
+# MASTER PLAN — From Job Evidence to Root Cause
+
+**Statistically Guaranteed and Cost-Aware Diagnosis of Node-Induced Performance Degradation in HPC Clusters**
+
+Owner: Mahesh Vellogi (with Vishwesh M, Awhan Ray) · Guide: Dr. K. Nagaraju · IIITDM Kurnool
+Version 1.0 · 9 Oct 2026 · Status: Layers 1–2 specified in full; Layer 3 provisional (papers pending)
+
+---
+
+## 0. How to use this document
+
+- This is the single source of truth for design. Claude Code implements it phase by phase.
+- Each claim carries a tag:
+  - **[V]** verified — from a paper we have, or computed from the actual data (source given).
+  - **[D]** design decision — our choice; can be changed, but only by editing this file and the Decision Log (§16).
+  - **[A]** assumption — must be tested; the phase that tests it is named.
+- Each phase has a **gate**: a measurable pass condition. We do not move on until it passes, or we
+  record why it failed and what we changed.
+- If code and this document disagree, the document wins until it is updated on purpose.
+
+---
+
+## 1. Project summary
+
+### 1.1 Problem
+A compute node can be **slow without being broken** (thermal throttling, memory-bandwidth loss,
+leftover processes, failing parts). In a tightly coupled job all nodes wait for the slowest one,
+so one slow node slows the whole job. A slow job may be the **workload's** fault (bigger input,
+heavier code) or a **node's** fault. Telling these apart today needs expensive always-on telemetry
+on every node.
+
+### 1.2 Mapping of the guide's objectives (from `hpc_project.pdf`) to our layers [V]
+
+| Guide's objective | Our component | Output |
+|---|---|---|
+| O1 Predict expected wall time; compute residuals | **Layer 1** — conformal job evidence | p-value per finished job |
+| O2 Separate workload variation from node degradation | **Layer 2** — node e-processes + e-BH | set of suspect nodes, FDR ≤ α |
+| O3 Trigger diagnostics only for suspects | **Layer 3** — cost-aware active probing | root cause + confidence + cost |
+| O4 Unified dataset and validation (HPAS) | **Phases 3 and 6** — semi-synthetic + real injection | ground truth for every layer |
+
+### 1.3 Gaps we fill (each backed by a source we hold)
+1. **No calibrated definition of "late".** UARP lists conformal prediction as future work:
+   "future work could employ conformal prediction (CP), which provides formal guarantees on
+   coverage probabilities" [V: UARP, §6].
+2. **Node flagging uses hand-picked thresholds.** The guide's notes use "median residual > 20%,
+   ≥ 10 jobs, ≥ 3 users, ≥ 3 applications, 3 windows" [V: hpc_project.pdf §10.5]. No error-rate
+   guarantee across hundreds of nodes.
+3. **Shared blame in multi-node jobs.** RUAD treats nodes as independent and leaves
+   inter-node dependencies to future work [V: RUAD §4.1].
+4. **Diagnosis cost not optimised.** Telemetry diagnosis assumes data from every node
+   (Tuncer 2019; Aksar 2024). *(Layer 3 papers pending — finalise in Phase 5.)*
+5. **Integration missing** — the guide's own SLR: "little work integrates uncertainty-aware
+   runtime residuals, multi-job node consensus, and on-demand high-resolution diagnosis" [V: hpc_prisma_slr.docx].
+
+### 1.4 Expected contributions (what the paper will claim, if results hold)
+- C1. Conformal p-values that make "this job was abnormally late" a statement with a bounded false-alarm rate.
+- C2. Anytime-valid per-node evidence (product e-process) plus e-BH selection: the expected fraction
+  of healthy nodes among flagged nodes is ≤ α, under any dependence between nodes.
+- C3. Allocation-size weighting that shares blame across a job's nodes while keeping C2 valid.
+- C4. Information-gain-per-cost probe selection for root cause, triggered only by C2.
+- C5. An evaluation protocol with exact ground truth (semi-synthetic injection on real job traces
+  + HPAS on a real cluster), released as open data and code.
+
+---
+
+## 2. What we know for certain, and what is still open
+
+### 2.1 Verified facts used by this plan
+
+| # | Fact | Source |
+|---|---|---|
+| F1 | Eagle file: 11,030,377 rows; submit times 2018-11-14 to 2023-02-22; 936 users; 42 partitions | computed on `eagle_data.parquet`, 9 Oct 2026 |
+| F2 | Eagle columns: job_id, user, account, partition, qos, wallclock_req, nodes_req, processors_req, gpus_req, mem_req, submit_time, start_time, end_time, run_time, state, name, work_dir, submit_line. **No node list.** | same |
+| F3 | Eagle states: COMPLETED 7,390,586; CANCELLED 1,813,244; FAILED 975,478; TIMEOUT 803,002; OUT_OF_MEMORY 20,400; PENDING 14,646; NODE_FAIL 12,088; RUNNING 933 | same |
+| F4 | Eagle `run_time` is seconds (= end − start for 99.97% of completed jobs). `wallclock_req` is consistent with seconds (run_time > wallclock_req for only 0.016% of completed jobs). 107 rows have no wallclock_req. | same |
+| F5 | Eagle COMPLETED+TIMEOUT: 8,193,588 jobs, ≈5,252/day; median run_time 992 s (≈16.5 min, matching the paper's "approximately 16 minutes"); 91.3% of completed jobs request 1 node; 10.1% run < 30 s | same |
+| F6 | Menear et al. (PEARC'23) protocol: drop cancelled and failed jobs, keep timeouts; train on jobs **ending** before split, test on jobs **submitted** on the split day; training window 100 days; test window 1 day (retrain daily); label encoding; best categorical set = user + partition; best numerical sets include processors and memory (wallclock always included); XGBoost 1.7.1 `XGBRegressor` defaults; 244 split times every 6 days; RMSE 8.14 h for their per-split feature selection (8.45 h for previous-split selection) | Mastering HPC Runtime Prediction §3.2–3.6, App. A–B |
+| F7 | PM100 (Marconi100): 231,116 jobs, May–Oct 2020, only jobs that ran exclusively on their nodes; one 287 MB parquet; Zenodo record 10127767 | Zenodo page |
+| F8 | PM100 fields include `nodes` ("List of nodes allocated to job"), `num_nodes_alloc`, `user_id`, `partition`, `qos`, `submit_time`, `start_time`, `end_time`, `run_time` (seconds), `time_limit` (minutes or INFINITE), `job_state`, `num_cores_req/alloc`, `num_gpus_req/alloc`, `mem_req/alloc` | PM100 repo `documentation/job_features.md` |
+| F9 | M100 node identifiers, user ids, job ids are anonymised to random integers; Nagios-flagged nodes are put **offline** and cannot run jobs until fixed | M100 ExaData paper |
+| F10 | UARP: LightGBM quantile models τ ∈ {0.50, 0.99}; residual model σ(x)=sqrt(E[(y−Q0.50)²|x]); margin = max(0.2·Q0.99, 0.5·σ); 200 iterations, learning rate 0.05, 50 leaves; 70/30 temporal split; 6 features; MinMax scaling | UARP §4, §5 |
+| F11 | CQR one-sided upper bound: P{Y ≤ q̂hi(X) + Q1−α(Ehi)} ≥ 1−α with Ehi = Y − q̂hi(X); Q = (1−α)(1+1/|I2|) empirical quantile | CQR eq. (11), (16) |
+| F12 | Smoothed conformal p-value p_n = (|{i ≤ n: α_i > α_n}| + θ_n |{i ≤ n: α_i = α_n}|)/n, θ_n ~ U[0,1]; if observations are exchangeable, p_1, p_2, … are IID uniform | Vovk, *Testing Randomness Online*, eq. (5), Prop. 3.1, Remark 3.2 |
+| F13 | Product of betting functions F = Π f_n(p_n) with ∫₀¹ f = 1 is a martingale; Ville: P(∃n: S_n ≥ c) ≤ 1/c | Vovk 2021 (STS); Vovk et al. 2021 (Retrain) |
+| F14 | Simple Jumper betting martingale, f_ε(p) = 1 + ε(p − 0.5), ε ∈ {−1, 0, 1}, switching rate J = 0.01 | Vovk et al. 2021 (Retrain), Alg. 1 |
+| F15 | Calibrator κp^(κ−1), κ ∈ (0,1) turns a p-value into an e-value; any decreasing f with ∫₀¹ f ≤ 1 is a calibrator | Ramdas & Wang monograph §2.3, eq. (2.1), Prop. 2.5 |
+| F16 | M_t = Π((1−λ_s) + λ_s E_s) with predictable λ_s ∈ [0,1] over sequential e-values (E[E_t | F_{t−1}] ≤ 1) is an e-process; the arithmetic mean is the special case "bet a fixed amount 1/K" | monograph Def. 7.19, Prop. 7.20, Def. 7.21, Def. 8.10 |
+| F17 | Base e-BH rejects the k* largest e-values, k* = max{k: k·e_[k]/K ≥ 1/α}; controls FDR at α under arbitrary dependence | Wang & Ramdas, eq. (5), Thm. 2 |
+| F18 | If e-values come only from calibrating valid p-values, e-BH "will typically not be more powerful than BH" | Wang & Ramdas, Remark 1 |
+| F19 | ACI update α_{t+1} = α_t + γ(α − err_t); long-run miscoverage → α for any data sequence; γ = 0.005 in their experiments | Gibbs & Candès eq. (2), Prop. 4.1, §2.1 |
+| F20 | TARE metrics: a_i = min(ŷ_i/y_i, y_i/ŷ_i); A_geo = Π a_i^(c_i/Σc) with c_i = nodes_req × runtime; UnderRate = mean 1[ŷ < y]; keep runtime > 30 s | TARE eq. (2)–(6) |
+| F21 | NodeSentry was evaluated on two private datasets (1,294 and 30 nodes), not public data | NodeSentry §4.1 |
+
+### 2.2 Open questions (each is closed by a named phase)
+
+| Q | Question | Closed in |
+|---|---|---|
+| Q1 | Exact PM100 column names/types, format of `nodes`, number of distinct nodes, jobs per node per day | Phase 0 |
+| Q2 | Do PM100 jobs ever overlap in time on the same node? (They should not — exclusive jobs) | Phase 0 |
+| Q3 | PM100 licence (check Zenodo page) | Phase 0 |
+| Q4 | Can we reproduce Menear's error level with a fixed feature set? | Phase 1 |
+| Q5 | Are our conformal p-values uniform on real, unmodified data (per user group)? | Phase 2 |
+| Q6 | Does the node e-process stay ≤ 1/α on clean data (no false flags), despite system-wide slowdowns? | Phase 4 |
+| Q7 | How many jobs (days) does it take to flag a node slowed by 10/20/30%? | Phase 4 |
+| Q8 | Institute cluster: size, scheduler, permission for fault injection | before Phase 6 |
+
+---
+
+## 3. System architecture
+
+```
+                  ┌──────────────────────────── offline training (daily) ───────────────────────────┐
+                  │  history (jobs ended before t) ──► quantile model q̂_0.9(x) on log runtime       │
+                  └──────────────────────────────────────────────────────────────────────────────────┘
+ Slurm job record (finished)
+   x_j = submit features, T_j = run_time, N_j = node list, u_j = user
+        │
+        ▼
+ ┌──────────────┐  S_j = log T_j − q̂(x_j)      ┌──────────────────────┐
+ │  LAYER 1     │ ───────────────────────────►  │ Mondrian (per user)  │──► p_j  (smoothed conformal p-value)
+ │  job evidence│                               │ online conformal     │──► alarm_j = 1[p_j ≤ α_job]  (ACI variant)
+ └──────────────┘                               └──────────────────────┘
+        │ p_j, N_j
+        ▼
+ ┌──────────────┐  for each node n in N_j:  M_n ← M_n · (1 + w_j (f(p_j) − 1)),  w_j = 1/|N_j|
+ │  LAYER 2     │  every evaluation time:   e-BH over {M_n} at level α  ──► suspect set S
+ │  node screen │
+ └──────────────┘
+        │ S  (only suspects)
+        ▼
+ ┌──────────────┐  belief π over causes; pick probe a* = argmax info-gain(a)/cost(a); update; stop at τ
+ │  LAYER 3     │  probes: CPU loop · STREAM · cache test · network ping-pong · 60-s telemetry → classifier
+ │  diagnosis   │  ──► report: node, cause, confidence, node-seconds used, recommended action (human approves)
+ └──────────────┘
+```
+
+### 3.1 Data contracts (tables passed between stages)
+All tables are parquet in `data/processed/`. Column names are fixed here; Phase 0 maps raw names onto them.
+
+**`jobs_<system>.parquet`** (one row per job, both systems)
+| column | type | notes |
+|---|---|---|
+| job_id | int64 | unique within system |
+| system | str | `eagle` or `pm100` |
+| user | str | anonymised id |
+| partition, qos | str | |
+| account | str or null | Eagle only |
+| name | str or null | job name (Eagle has it; PM100: Phase 0 decides) |
+| submit_time, start_time, end_time | timestamp | |
+| run_time_s | float64 | seconds, ≥ 0 or null (loaders are lossless, D8; `> 0` and other filters are applied per phase) |
+| walltime_req_s | float64 | requested limit in seconds (PM100: time_limit × 60; INFINITE → null) |
+| nodes_req, procs_req, gpus_req | int64 | |
+| mem_req | float64 | units as in source; recorded in data card |
+| state | str | normalised: COMPLETED, TIMEOUT, other |
+| state_raw | str | state exactly as in the source file (D9) |
+| censored | bool | TRUE if state == TIMEOUT (true runtime ≥ observed) |
+
+**`job_nodes_pm100.parquet`** (one row per job × node; PM100 only)
+| job_id | node_id (int64) | n_nodes (int64) | start_time | end_time |
+
+**`layer1_scores_<system>_<run_id>.parquet`**
+| job_id | end_time | group_key | q_hat | score | p_value | theta | alarm_fixed | alarm_aci | model_version |
+
+**`layer2_state_<run_id>.parquet`** (one row per node per evaluation time)
+| eval_time | node_id | log_M | n_jobs | n_users | flagged_ebh | flagged_<baseline> |
+
+**`truth_<scenario_id>.parquet`** (Phase 3)
+| node_id | onset_time | end_time | factor | kind (`node`, `user_decoy`, `system_shock`) |
+
+---
+
+## 4. Datasets
+
+| Dataset | Role | Get it | Size | Status |
+|---|---|---|---|---|
+| NREL Eagle jobs | Layer 1 development and reproduction | https://data.openei.org/submissions/5860 → `eagle_data.parquet` | 241 MB | **You have it** [V]. Licence CC-BY 4.0 [V]. Cite dataset + Menear et al. |
+| PM100 (Marconi100) | Layers 1 + 2 (has node lists) | https://zenodo.org/records/10127767 → `job_table.parquet`; code https://github.com/francescoantici/PM100-data | 287 MB | Downloading. Licence: check Zenodo page (Q3) |
+| M100 full (Nagios) | Weak real labels for Layer 2 (exploratory) | parent DOI 10.5281/zenodo.7588815; tools https://gitlab.com/ecs-lab/exadata | 30–45 GB per month | **Do not download yet.** Phase 4b only, 1–2 months, Nagios plugin only |
+| Prodigy (Eclipse) | Layer 3 telemetry classifier | 10.5281/zenodo.8079388 | small | You have it (earlier project) |
+| HPAS | Fault injection (Phase 6) | https://github.com/peaclab/HPAS (BSD-3) | code | Phase 6 |
+| F-DATA (Fugaku) | — | — | — | **Not used**: no node list |
+
+Rules [D]: raw files live in `data/raw/<dataset>/` and are never edited. `scripts/download_data.py`
+records SHA-256 of every raw file in `data/raw/CHECKSUMS.txt`; every run checks them.
+
+---
+
+## 5. Repository layout [D]
+
+```
+HPC/                                  ← project root (open Claude Code here)
+├── CLAUDE.md                         ← rules for Claude Code
+├── README.md
+├── pyproject.toml                    ← uv-managed; pinned versions
+├── .gitignore                        ← data/, runs/, .venv/, *.parquet
+├── docs/
+│   ├── PLAN.md                       ← this file
+│   ├── PHASE_PROMPTS.md
+│   ├── data_cards/eagle.md, pm100.md ← schema, units, filters, counts (Phase 0)
+│   └── decisions.md                  ← decision log (copy of §16, kept current)
+├── configs/
+│   ├── phase1_menear.yaml
+│   ├── phase2_conformal.yaml
+│   ├── phase3_inject.yaml
+│   └── phase4_layer2.yaml
+├── data/
+│   ├── raw/eagle/eagle_data.parquet
+│   ├── raw/pm100/job_table.parquet
+│   ├── raw/CHECKSUMS.txt
+│   ├── interim/
+│   └── processed/
+├── src/hpcdiag/
+│   ├── io/            (loaders, schema mapping, validation)
+│   ├── features/      (encoders, feature sets)
+│   ├── layer1/        (runtime models, splits, conformal, aci)
+│   ├── stats/         (conformal p-values, calibrators, betting, e-process, ebh, bh)
+│   ├── layer2/        (node accumulation, baselines, evaluation)
+│   ├── inject/        (semi-synthetic scenarios)
+│   ├── layer3/        (classifier, probes, bayes, selection)   ← provisional
+│   ├── eval/          (metrics, plots, tables)
+│   └── utils/         (config, logging, run ids, seeds)
+├── scripts/           (download_data.py, make_figures.py)
+├── tests/             (pytest; one file per module)
+├── notebooks/         (exploration only; never the source of reported numbers)
+├── runs/<phase>/<run_id>/   (outputs; git-ignored)
+└── reports/phase_<N>.md     (what was done, numbers, figures, gate result)
+```
+
+---
+
+## 6. Environment [D]
+
+- Machine: MacBook Air, Apple Silicon (arm64) [V: device info]. Keep the project in
+  `~/Downloads/Final Year Project/HPC/` (not Desktop/Documents, which sync to iCloud and would upload GBs).
+- Python 3.11 via `uv`. Core packages: pandas, pyarrow, duckdb, numpy, scipy, scikit-learn,
+  xgboost, lightgbm, matplotlib, pyyaml, tqdm, pytest, ruff, hypothesis (property tests).
+  PyTorch only in Phase 5.
+- Memory discipline: read only needed columns; use duckdb for filtering 11M rows; use
+  `category`/int codes for user/partition.
+- Speed budget: a 100-day Eagle training set is ≈ 525k jobs (F5 × 100). One XGBoost fit on ~7
+  features should take well under a minute; 244 splits ≈ 1–3 h. Always run a **fast mode**
+  (12–24 splits) first.
+
+---
+
+## 7. Engineering rules [D]
+
+1. Config-driven: no magic numbers in code; every constant is in `configs/*.yaml` with a comment citing this plan.
+2. Every run writes `runs/<phase>/<run_id>/` with `config_used.yaml`, `git_commit.txt`,
+   `metrics.json`, `log.txt`, figures, and the exact command.
+3. Seeds: numpy, random, xgboost, lightgbm, torch. The conformal tie-breaker θ uses its own seeded generator.
+4. Leakage tests (must exist and pass):
+   - model for split t trained only on jobs with `end_time < t`;
+   - conformal calibration for job j uses only jobs with `end_time < end_time_j`;
+   - Layer 2 state at time t uses only jobs ended ≤ t.
+5. Statistical unit tests (must exist and pass before real data):
+   - conformal p-values are uniform on IID simulated scores (KS test p > 0.01 over 10⁴ draws, several seeds);
+   - calibrator integrates to 1 numerically (|∫ − 1| < 1e−6);
+   - e-process stays a martingale under the null: mean of M_T over 10⁴ simulations ≈ 1 (within 3 standard errors), and P(max M ≥ 1/α) ≤ α + tolerance;
+   - e-BH matches a hand-computed example and the brute-force definition in eq. (F17);
+   - e-BH on simulated null e-values gives empirical FDR ≤ α.
+6. Reports are generated from `metrics.json` files by a script, not typed by hand.
+
+---
+
+## 8. Security and safety rules [D]
+
+- No secrets in the repo. No credentials needed for public datasets.
+- Data are anonymised by their publishers [V: F9]; do not try to de-anonymise; do not join with other sources.
+- Project code makes no network calls except the download script (HTTPS, checksum-verified).
+- Downloaded archives are untrusted: extract into their own empty folder; never run code from them.
+- The system **recommends**; it never drains, reboots or modifies a real node. Any cluster action
+  (Phase 6) needs written admin approval, runs only on dedicated nodes, and uses the HPAS
+  generators with time limits.
+- Pin dependency versions; record `uv.lock`.
+- Licences: cite Eagle (CC-BY 4.0), PM100/M100 (per Zenodo), HPAS (BSD-3), Prodigy (BSD-3).
+
+---
+
+## 9. Phases
+
+Estimated calendar (adjust after Phase 1): Phase 0–1 Oct · Phase 2 Nov · Phase 3–4 Nov–Dec ·
+Phase 5 Jan · Phase 6 Jan–Feb (cluster permitting) · Phase 7 Feb–Mar.
+
+---
+
+### Phase 0 — Setup and data check
+
+**Goal.** Working repo, environment, verified schemas for both datasets, closed questions Q1–Q3.
+
+**Tasks.**
+1. Create the layout in §5; `git init`; `.gitignore`; `uv init`; pin packages (§6).
+2. Move `eagle_data.parquet` → `data/raw/eagle/` (ask the human first); put PM100 in `data/raw/pm100/`.
+3. `scripts/download_data.py`: computes and stores SHA-256 for files already present (no download needed now).
+4. `src/hpcdiag/io/`: loaders that map raw columns to the contract in §3.1. Units documented.
+5. Data cards `docs/data_cards/{eagle,pm100}.md` with: schema; row counts; date range; state counts;
+   units; missing values; runtime quantiles; per-user job counts.
+6. PM100 specifics: parse `nodes` into `job_nodes_pm100.parquet`; count distinct nodes; jobs per
+   node per day (median, 10th, 90th percentile); check overlaps of jobs on the same node (Q2);
+   fraction of multi-node jobs; `time_limit` conversion; record licence (Q3).
+
+**Gate 0.** Both loaders pass schema tests; data cards exist; Eagle numbers match F1–F5 exactly;
+Q1–Q3 answered in `reports/phase_0.md`.
+
+---
+
+### Phase 1 — Layer 1 baseline: reproduce Menear et al. on Eagle
+
+**Goal.** A trustworthy runtime model and evaluation harness, checked against a published number.
+
+**Method (from F6).**
+- Filter: keep COMPLETED and TIMEOUT; drop all other states [V: F6 says cancelled and failed are
+  dropped and timeouts kept; OUT_OF_MEMORY, NODE_FAIL, PENDING, RUNNING are also dropped — **D**].
+  Drop rows with missing wallclock_req [D].
+- Target: `run_time` in seconds. Report RMSE in **hours** (to compare with 8.14 h).
+- Features (fixed set, **D**): numerical = wallclock_req, processors_req, mem_req, nodes_req, gpus_req;
+  categorical = user, partition (label-encoded; codes fitted on the training window; unseen → −1).
+- Splits: split times every 6 days across the data (first split ≥ 100 days after start);
+  train = jobs with `end_time` in [t − 100 d, t); test = jobs with `submit_time` in [t, t + 1 d).
+- Model: `xgboost.XGBRegressor()` defaults (record the version; the paper used 1.7.1).
+- Also run: the "similar jobs" and "recent jobs" heuristics only if time permits (optional).
+
+**Outputs.** Per-split metrics (RMSE h, MAE h, TARE A_geo, UnderRate), error by actual-runtime
+bins (0–1 h, 1–6 h, 6–24 h, 1–2 d, > 2 d), plot of predicted vs actual by bin.
+
+**Gate 1.** Overall RMSE over all splits is within ±20% of 8.14 h (i.e. 6.5–9.8 h) **and** the
+qualitative pattern holds: underestimation grows for jobs > 2 days [V: Menear §3.6]. If outside the
+range: report it, check filters/units, do not tune on test splits.
+
+---
+
+### Phase 2 — Layer 1: quantile model + conformal p-values + ACI
+
+**Goal.** For every finished job, a p-value that is uniform when the job is "normal", and a job
+alarm whose long-run false-alarm rate is α.
+
+**2.1 Quantile model [D].** LightGBM with `objective="quantile"`, `alpha=0.9`, on y = log(max(run_time,1)).
+Same features and split protocol as Phase 1. Also fit τ = 0.5 (median) for reporting.
+(UARP settings as a reference: 200 iterations, lr 0.05, 50 leaves [V: F10].)
+
+**2.2 Nonconformity score (one-sided CQR, F11).** S_j = log T_j − q̂_0.9(x_j). Large S = late.
+TIMEOUT jobs are right-censored: their S is a lower bound, which can only make their p-value larger
+(conservative) [A — check the fraction of TIMEOUT jobs among alarms].
+
+**2.3 Two p-value modes (both implemented, compared) [D].**
+- **Mode E (exact).** Train the quantile model **once** on a 100-day prefix, then freeze it.
+  For each group g (user), process that user's later jobs in end-time order and compute the
+  smoothed online conformal p-value (F12):
+  p_n = ( |{i ≤ n : S_i > S_n}| + θ_n · |{i ≤ n : S_i = S_n}| ) / n,  i over the group's jobs so far including n.
+  Under exchangeability within the group these are IID uniform [V: F12] — this is what Layer 2's
+  product needs.
+- **Mode A (adaptive).** Retrain daily (Phase 1 protocol). Calibrate on the group's jobs that ended
+  in the last W_cal = 14 days (not used for training that day's model, **D**), re-scored with the current model:
+  p_j = (1 + |{i ∈ C_g : S_i ≥ S_j}|) / (|C_g| + 1). Valid marginally under exchangeability with C_g;
+  dependence across jobs is not exact [A].
+- Group fallback [D]: if a user has fewer than n_min = 30 calibration jobs, use partition; then global.
+  Record which level was used (`group_key`).
+
+**2.4 Job alarm and ACI (F19).** Fixed rule: alarm if p_j ≤ α_job (α_job = 0.05).
+ACI rule (per group): alarm if p_j ≤ α_t; after each job, α_{t+1} = α_t + γ(α_job − err_t),
+err_t = alarm indicator; γ = 0.005 [V: Gibbs & Candès' choice] plus a sensitivity check γ ∈ {0.001, 0.01}.
+
+**2.5 Baselines.**
+- B-guide: relative residual r = (T − T̂)/T̂ from Phase 1 XGBoost; alarm if r > 0.20 [V: hpc_project.pdf].
+- B-UARP: alarm if T > Q0.99 + max(0.2·Q0.99, 0.5·σ) [V: F10].
+- B-user: alarm if T > wallclock_req (trivially rare; reported for context).
+
+**2.6 Metrics.** On held-out, unmodified data (assumed mostly healthy):
+false-alarm rate vs α (overall, per runtime bin, per top-decile resource use);
+p-value histogram + KS distance to uniform (overall and per group);
+coverage and width of the upper bound; TARE A_geo and UnderRate for the τ=0.5 model.
+
+**Gate 2.** Mode E: KS distance of pooled p-values to uniform ≤ 0.02, and empirical
+false-alarm rate within α ± 0.01 at α ∈ {0.01, 0.05, 0.10}. ACI: long-run alarm rate within
+α ± 0.005 over the test period. If Mode E fails, report per-group drift and switch the
+default to Mode A only with written reasons (Decision Log).
+
+**Note.** Eagle has no node list, so Layer 1 is first built and validated on Eagle,
+then re-run unchanged on PM100 to feed Layer 2 (Gate 2 is checked on both).
+
+---
+
+### Phase 3 — Ground truth: semi-synthetic injection on PM100
+
+**Goal.** Exact, known labels on a real 980-node workload, so Layer 2 can be measured.
+
+**Scenarios [D].**
+- **Node degradation.** Pick K nodes (K = 1%, 2%, 5% of active nodes), onset time t₀ (random, after
+  the warm-up period), factor s ∈ {1.1, 1.2, 1.3, 1.5}. Any job using a degraded node and starting
+  after t₀ gets T' = s · T [A: straggler model — a tightly coupled job runs at its slowest node's
+  speed]. Variant "partial": T' = T · (1 + (s−1)·φ), φ = fraction of the job's time after t₀.
+- **User decoy (workload variation).** Pick a user; all their jobs after t₀ get T' = s · T on every
+  node. Correct behaviour: **no node is flagged** (this directly tests the guide's Objective 2).
+- **System shock.** All jobs ending in a time window [t₁, t₁ + 6 h] get T' = s · T. Correct
+  behaviour: no node is flagged.
+- **Censoring.** If T' exceeds the job's time limit, set T' = limit and `censored = TRUE`.
+- Each scenario has ≥ 20 random seeds.
+
+**Gate 3.** Unit tests show: unaffected jobs are byte-identical; affected jobs follow the formula;
+truth tables match the injected set exactly.
+
+---
+
+### Phase 4 — Layer 2: node e-processes and e-BH
+
+**4.1 Per-node evidence (F15, F16).** Each node n starts with M_n = 1. When job j ends, for every node
+n ∈ N_j:
+
+  M_n ← M_n · (1 + w_j · (f(p_j) − 1)),  w_j = 1 / |N_j|.
+
+- f is a betting function with ∫₀¹ f = 1, decreasing (we only bet on lateness). Default [D]:
+  mixture over κ ∈ {0.05, 0.1, 0.25, 0.5} of the power calibrator f_κ(p) = κ p^(κ−1), implemented as
+  an average of the four e-processes (an average of e-processes is an e-process).
+- Re-adaptation [D]: a one-sided Simple-Jumper-style mixture (F14) that switches between "bet" and
+  "no bet" with J = 0.01, so a node that was healthy for months can still be flagged quickly
+  after it degrades. Compare against the plain product (ablation).
+- w_j is known when the job starts (allocation size), so it is predictable [V: F16 requires λ_s
+  predictable].
+- Validity condition [A, tested in Gate 4a]: under "node n is healthy", the p-values of jobs on n
+  are sequentially valid, E[f(p_j) | past] ≤ 1. This holds if p-values are uniform given the past
+  (Mode E) and node placement does not depend on lateness.
+- Work in log space: log M (avoid overflow).
+
+**4.2 System-shock guard [D].** A filesystem slowdown makes all jobs late at once, which would raise
+every node's M together. Two options, both implemented and compared:
+(a) detrend: S'_j = S_j − median(S over all jobs that ended in the 6 h before end_time_j);
+(b) global monitor: a conformal martingale on all jobs; while it signals a system-wide shift,
+freeze Layer 2 updates. Default chosen by Gate 4a.
+
+**4.3 Selection (F17).** At each evaluation time (every 6 h, **D**): among m active nodes, base
+e-BH at level α = 0.1: flag the k* nodes with largest M, k* = max{k : k·M_[k]/m ≥ 1/α}.
+After a node is flagged and handed to Layer 3, its M is reset to 1 once it is cleared or repaired.
+
+**4.4 Baselines.**
+- B1 guide heuristic: median relative residual > 20%, ≥ 10 jobs, ≥ 3 users, ≥ 3 distinct job
+  names (if PM100 lacks names: ≥ 3 distinct partitions/qos — decided in Phase 0), persistent for 3
+  consecutive windows [V: hpc_project.pdf §10.5].
+- B2 top-5%: flag the top 5% of nodes by mean residual each window.
+- B3 BH on per-node Fisher-combined p-values (assumes independence).
+- B4 averaged e-values (our earlier design; expected to be nearly powerless — included to show why).
+- B5 per-node Ville threshold M_n ≥ 1/α without e-BH (no multiplicity control).
+
+**4.5 Metrics.** Over seeds: empirical FDR (mean of false flags / max(flags, 1)), recall
+(degraded nodes flagged), detection delay (hours and jobs after onset), false flags in decoy and
+shock scenarios, number of flags per day on clean data.
+
+**Gate 4a (validity, clean data).** On unmodified PM100 and on decoy/shock scenarios:
+empirical FDR ≤ α (+ 2 standard errors) and mean false flags per day reported; B2 must show
+its fixed false-flag rate (sanity check).
+**Gate 4b (power).** At s = 1.3 and K = 1%: recall reported with detection delay; target ≥ 0.8
+recall within 14 days [D — adjust only with a written reason]. Report the s at which recall drops
+below 0.5.
+
+**4.6 Exploratory (optional) — real labels.** Download Nagios for 1–2 months of M100. Because
+flagged nodes are taken offline [V: F9], test whether M_n rises in the days **before** a Nagios
+critical event. Report as exploratory; not a primary result.
+
+---
+
+### Phase 5 — Layer 3 offline (provisional — finalise after Layer 3 papers)
+
+- 5.1 Telemetry classifier: Prodigy data, three classes (healthy / cpuoccupy / memleak);
+  Random Forest (default), Triplet and gated-Triplet as comparisons; grouped CV by job (as in the
+  existing project). Output: class probabilities = likelihood for the "telemetry" probe.
+- 5.2 Probe-selection engine: belief π over causes H; probes A with cost c_a; outcome model
+  P(o | h, a) (discretised outcomes, e.g. benchmark score ratio vs healthy baseline in bins);
+  choose a* = argmax_a [H(π) − E_o H(π | o, a)] / c_a; Bayes update; stop when max π ≥ τ or budget spent.
+  Tests on toy tables where the right first probe is known by hand.
+
+**Gate 5.** Classifier results reproduced with grouped CV; selection engine passes the toy tests;
+on simulated likelihood tables, the engine reaches the same accuracy as "run all probes" with fewer
+probes (report the number).
+
+---
+
+### Phase 6 — Real cluster and HPAS (needs admin approval)
+
+Provisional. Tasks: install HPAS on 2–4 dedicated nodes; write probes (fixed-work CPU loop, STREAM,
+cache test, OSU ping-pong against a healthy node, 60-s telemetry capture); run healthy baselines;
+run a factorial campaign (anomaly type × intensity × repetitions) with exact start/stop logs;
+estimate P(o | h, a); end-to-end run: submit benchmark jobs, inject at random times, measure
+time-to-flag, diagnosis accuracy and node-seconds spent vs a fixed battery.
+
+**Gate 6.** End-to-end run completes; every number traced to logs; admin sign-off recorded.
+
+---
+
+### Phase 7 — Paper, release, final report
+
+- Ablations: no weighting (w=1); no conformal (raw residual + threshold); averaging vs product;
+  no shock guard; Mode A vs Mode E; jumper vs plain product.
+- Figures: p-value histograms; false-alarm vs α; FDR vs α; recall and delay vs s; probe cost.
+- Release: code (open licence), the semi-synthetic scenario generator, scenario seeds, and (if
+  allowed) cluster injection logs.
+- Venue choice with the guide (see §13).
+
+---
+
+## 10. Metric definitions (central)
+
+| Metric | Definition |
+|---|---|
+| RMSE (h) | sqrt(mean((ŷ − y)²)) / 3600 |
+| A_geo | Π a_i^(c_i/Σ_j c_j), a_i = min(ŷ_i/y_i, y_i/ŷ_i), c_i = nodes_req × run_time [V: F20] |
+| UnderRate | mean 1[ŷ_i < y_i] [V: F20] |
+| False-alarm rate (job) | fraction of jobs with alarm, on data with no injected change |
+| KS distance | sup_u |F̂_p(u) − u| over pooled p-values |
+| FDP / FDR | false flags / max(flags,1); FDR = its mean over seeds and evaluation times |
+| Recall | degraded nodes flagged at least once after onset / degraded nodes |
+| Detection delay | time (h) and jobs from onset to first flag |
+| Probe cost | node-seconds spent by Layer 3 per diagnosis |
+
+---
+
+## 11. Experiment tracking
+
+Every run appends one line to `runs/registry.csv`: run_id, phase, config hash, git commit, start,
+end, status, key metrics. Reports cite run ids.
+
+---
+
+## 12. Threats to validity and mitigations
+
+| Threat | Mitigation |
+|---|---|
+| Workload drift breaks exchangeability | Mode A, ACI, short calibration windows; report measured (not just theoretical) error rates |
+| System-wide slowdowns inflate all nodes | §4.2 guard; shock scenarios in Phase 3 |
+| Node placement correlated with lateness (e.g. certain users on certain racks) | Mondrian by user; check per-node p-value uniformity on clean data (Gate 4a) |
+| Injection model too simple (straggler assumption) | "partial" variant; Phase 6 real injections |
+| PM100 contains only exclusive jobs | state as limitation; shared-node jobs future work |
+| Nagios labels mark offline nodes, not slow nodes | used only as exploratory precursor analysis |
+| e-BH conservative (F18) | report power honestly; compare with BH (B3) |
+| Small cluster for Phase 6 | primary results from PM100 semi-synthetic; Phase 6 as demonstration |
+
+---
+
+## 13. Paper plan
+
+Working title: *Anytime-Valid Detection of Degraded Compute Nodes from Scheduler Logs with
+Conformal E-Processes* (Layers 1–2), with Layer 3 as an extension if Phase 6 succeeds.
+Target order: journal (J. Supercomputing / FGCS) or an IPDPS/SC workshop or HiPC; Euro-Par/ICPP
+only with full three-layer results. Decide with the guide after Gate 4b.
+
+---
+
+## 14. Glossary (plain English)
+
+- **Quantile model**: predicts "90% of jobs like this finish within X".
+- **Conformal p-value**: "what fraction of this user's normal jobs were at least this late".
+- **Exchangeable**: the order of past jobs carries no information (like shuffled cards).
+- **E-value**: a bet against "nothing is wrong"; worth at most 1 on average when nothing is wrong.
+- **E-process**: the running total of such bets over time; you can check it whenever you like.
+- **FDR**: among the nodes we flag, the average fraction that are actually healthy.
+- **e-BH**: the rule that picks which nodes to flag so that FDR ≤ α.
+- **ACI**: a thermostat that nudges the alarm threshold so the long-run alarm rate stays at α.
+
+---
+
+## 15. References (we hold all of these)
+
+1. Menear et al., Mastering HPC Runtime Prediction, PEARC'23, 10.1145/3569951.3593598
+2. Choi & Oh, UARP, J. Supercomputing 2026, 10.1007/s11227-026-08422-8
+3. Xiao et al., TARE, ICPP'26, arXiv 2607.04935
+4. Romano, Patterson, Candès, Conformalized Quantile Regression, NeurIPS 2019, arXiv 1905.03222
+5. Angelopoulos & Bates, Conformal Prediction: A Gentle Introduction, arXiv 2107.07511
+6. Gibbs & Candès, Adaptive Conformal Inference Under Distribution Shift, NeurIPS 2021, arXiv 2106.00170
+7. Fan, Rich, Allcock, Papka, Lan, Trade-off between Prediction Accuracy and Underestimation Rate in Job Runtime Estimates, IEEE CLUSTER 2017 (DOI not printed in our copy — confirm on IEEE Xplore before citing)
+8. Wang & Ramdas, False Discovery Rate Control with E-values, JRSSB 2022, 10.1111/rssb.12489
+9. Ramdas & Wang, Hypothesis Testing with E-values, 2025, 10.1561/3600000002
+10. Vovk, Testing Randomness Online, Statistical Science 2021, 10.1214/20-STS817
+11. Vovk et al., Retrain or not retrain: conformal test martingales, COPA 2021, arXiv 2102.10439
+12. Borghesi et al., M100 ExaData, Scientific Data 2023, 10.1038/s41597-023-02174-3
+13. Antici et al., PM100, SC-W 2023, 10.1145/3624062.3624263
+14. Molan et al., RUAD, arXiv 2208.13169
+15. Xia et al., NodeSentry, SC'25, 10.1145/3712285.3759794
+16. Duplyakin & Menear, NREL Eagle supercomputer jobs (dataset), OEDI 5860, 2023
+17. Layer 3 (pending): Tuncer TPDS 2019 (10.1109/TPDS.2018.2870403); Ates HPAS ICPP 2019
+    (10.1145/3337821.3337907); Rish et al. TNN 2005 (10.1109/TNN.2005.853423); Aksar TPDS 2024
+    (10.1109/TPDS.2024.3365462); Prodigy SC'23 (10.1145/3581784.3607076)
+
+---
+
+## 16. Decision log (initial)
+
+| # | Date | Decision | Reason |
+|---|---|---|---|
+| D1 | 9 Oct 2026 | Layer 1 developed on Eagle; Layer 2 on PM100 | Eagle has no node list (F2); PM100 has `nodes` (F8) |
+| D2 | 9 Oct 2026 | Per-node evidence is a **product** e-process, not an average | Average is a fixed-amount bet (F16) and cannot reach e-BH thresholds with ~1000 nodes |
+| D3 | 9 Oct 2026 | Two conformal modes (E exact, A adaptive) | Exact sequential validity (F12) vs drift robustness |
+| D4 | 9 Oct 2026 | Nagios used only for exploratory precursor analysis | Flagged nodes are offline (F9) |
+| D5 | 9 Oct 2026 | Keep COMPLETED + TIMEOUT; drop other states | Follows F6 for cancelled/failed; others not runtime-meaningful |
+| D6 | 9 Oct 2026 | Fixed Phase 1 feature set (no per-split search) | Cost; the paper's search needed 50,752 fits (F6) |
+| D7 | 9 Oct 2026 | Mondrian group = user, fallback partition → global, n_min = 30 | User is the most predictive feature (F6); groups need enough history |
+| D8 | 9 Oct 2026 | Loaders are lossless; filtering happens per phase | Every raw row is kept in `data/processed/` (null/0 allowed, negatives rejected); each phase applies and documents its own filters |
+| D9 | 9 Oct 2026 | `state_raw` kept alongside `state` | Normalised `state` (COMPLETED/TIMEOUT/other) loses the original state; data cards and later filters need it |
