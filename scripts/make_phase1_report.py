@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 
+import duckdb
 import numpy as np
 import pandas as pd
 
@@ -122,6 +123,22 @@ def main() -> int:
     worst["n_gt_2d"] = worst["split_t"].map(long_n).astype(int)
     worst["sse_share"] = worst["split_t"].map(sse) / sse.sum()
 
+    # ---- skipped splits (logged by the runner), with window counts recomputed from the data
+    log_txt = resolve(f"runs/phase1/{runs['main']}/log.txt").read_text()
+    skipped = [pd.Timestamp(x) for x in re.findall(r"split (\S+ \S+) skipped", log_txt)]
+    con = duckdb.connect()
+    con.sql("SET TimeZone='UTC'")
+    jobs = str(resolve(cfg["data"]["jobs"])).replace("'", "''")
+    states = ", ".join(f"'{x}'" for x in cfg["filters"]["states"])
+    base = f"from '{jobs}' where state_raw in ({states}) and walltime_req_s is not null"
+    sk_rows = []
+    for t in skipped:
+        tr = con.sql(f"select count(*) {base} and end_time >= TIMESTAMP '{t - pd.Timedelta(days=100)}' and end_time < TIMESTAMP '{t}'").fetchone()[0]
+        te = con.sql(f"select count(*) {base} and submit_time >= TIMESTAMP '{t}' and submit_time < TIMESTAMP '{t + pd.Timedelta(days=1)}'").fetchone()[0]
+        sk_rows.append((t, tr, te))
+    if len(skipped) + len(ps) != m["n_splits_full_list"]:
+        raise SystemExit("skipped + used splits != full list")
+
     pytest_lines = sh(["uv", "run", "pytest", "-q"]).splitlines()
     pytest_summary = [ln for ln in pytest_lines if re.search(r"\d+ passed", ln)][-1]
     ruff = sh(["uv", "run", "ruff", "check", "."]).splitlines()[-1]
@@ -137,7 +154,7 @@ Do not edit by hand; re-run the script._
 
 | condition | value | result |
 |---|---|---|
-| pooled RMSE (main, all {f(m["test_jobs"])} test jobs of {m["n_splits_used"]} splits) in [{lo:.3f}, {hi:.3f}] h | {pooled:.3f} h | {"pass" if in_band else "**fail**"} |
+| pooled RMSE (main, all {f(m["test_jobs"])} test jobs of {m["n_splits_used"]} non-empty splits; 244 split times) in [{lo:.3f}, {hi:.3f}] h | {pooled:.3f} h | {"pass" if in_band else "**fail**"} |
 | long-job rule: median r in > 2 d bin negative and lowest of the five bins | {m["qualitative"]["median_r_long_bin"]:+.3f} (negative: {f(m["qualitative"]["negative"])}, lowest: {f(m["qualitative"]["lowest"])}) | {"pass" if qual else "**fail**"} |
 | rule 2(b): median per-split RMSE (main) in band | {med:.3f} h | {"inside" if med_in_band else "outside"} |
 | rule 2(c): known setup gaps listed | §2 | listed |
@@ -185,6 +202,14 @@ Sensitivity runs (§6) are labelled SENSITIVITY ONLY and do not change this outc
     s += f"""
 - xgboost {m["xgboost_version"]}; model params: main `{m["model_params"] or "defaults"}`; full booster config in each run's `xgb_config.json` (identical across splits apart from base_score).
 - Splits: {m["n_splits_full_list"]} in the full list, first {m["first_split"]}, last {m["last_split"]}; all variants use the same split times (from the main-filtered rows).
+- Splits used: {len(ps)} of {m["n_splits_full_list"]}. {len(sk_rows)} split(s) were skipped because the train or test window was empty (main filter):
+
+| skipped split time | training jobs | test jobs |
+|---|---|---|
+""" + "".join(f"| {t} | {f(int(a))} | {f(int(b))} |\n" for t, a, b in sk_rows) + f"""
+  A skipped split contributes no test jobs, so pooled metrics are unaffected; mean/median of
+  per-split RMSE are over the {len(ps)} non-empty splits. Whether the paper's 244 splits include
+  empty test days is unknown.
 - Leakage check: max(train end_time − split time) over splits = {m["leakage_check"]["max_train_end_minus_split_s"]:.0f} s (must be < 0).
 - Tests: `{pytest_summary}`; lint: `{ruff}`.
 

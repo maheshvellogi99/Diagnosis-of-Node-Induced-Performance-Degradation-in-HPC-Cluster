@@ -92,8 +92,9 @@ def rmse_over_time(split_t: pd.Series, rmse_h: pd.Series, band: tuple[float, flo
     fig.patch.set_facecolor(SURFACE)
     ax.axhspan(band[0], band[1], color=GRID, alpha=0.45, lw=0)
     ax.axhline(ref, color=INK_2, lw=1, ls="--")
-    ax.text(split_t.iloc[0], ref, f" reference {ref:g} h; shaded = Gate 1 band", color=INK_2,
-            fontsize=8, va="bottom")
+    ax.text(0.995, 0.97, f"dashed = reference {ref:g} h; shaded = Gate 1 band "
+            f"[{band[0]:.3f}, {band[1]:.3f}] h", transform=ax.transAxes, color=INK_2,
+            fontsize=8, va="top", ha="right")
     ax.plot(split_t, rmse_h, color=SERIES_1, lw=1.5, marker="o", ms=3)
     ax.set_ylabel("RMSE per split (h)")
     ax.set_ylim(bottom=0)
