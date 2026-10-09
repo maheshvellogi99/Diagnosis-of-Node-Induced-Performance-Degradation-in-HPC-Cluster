@@ -68,3 +68,15 @@ class TimeIndex:
         a = np.searchsorted(self.submit_sorted, lo, side="left")
         b = np.searchsorted(self.submit_sorted, hi, side="left")
         return np.sort(self.submit_order[a:b])
+
+
+def mode_a_windows(index: TimeIndex, t: pd.Timestamp, train_days: float, cal_days: float,
+                   test_days: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Mode A (PLAN 2.3, addendum B): train end_time in [t - cal - train, t - cal),
+    calibration end_time in [t - cal, t), test submit_time in [t, t + test).
+    Train and calibration are disjoint by construction."""
+    cal_start = t - pd.Timedelta(days=cal_days)
+    train = index.train_positions(cal_start, train_days)
+    cal = index.train_positions(t, cal_days)
+    test = index.test_positions(t, test_days)
+    return train, cal, test
