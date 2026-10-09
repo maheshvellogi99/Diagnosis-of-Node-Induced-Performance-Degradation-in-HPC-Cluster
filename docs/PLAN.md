@@ -396,10 +396,31 @@ from TARE's weight c_i = nodes_req × actual run time. Also: share of alarms tha
 (censored) jobs, and false-alarm rates in the 1–2 d and > 2 d bins reported separately.
 Mode E is reported on (i) all post-freeze jobs and (ii) the Mode A test days.
 
-**Gate 2.** Checked separately on Eagle and PM100, main population (D17). Mode E (fallback
+**2.8 Mode P — pooled sliding-window conformal (D22, PROMPT 2B).** Scores = the Mode E frozen-model
+scores S_j (no refit). Reference R_j = all jobs of the same population that come before j in D14
+order (end_time, then row_id) with end_time ≥ end_time_j − W; no user/partition grouping.
+p_j = (#{i ∈ R_j : S_i > S_j} + θ_j (1 + #{i ∈ R_j : S_i = S_j})) / (|R_j| + 1), θ_j from the
+theta_seed generator; |R_j| < 30 → NaN (warm-up), excluded from evaluation and from Layer 2.
+Main W = 7 d; W ∈ {6 h, 1 d, 365 d} and a q̂-decile Mondrian variant are reported (disclosure: the
+architect chose W = 7 d after looking at these on PM100 fast Mode E scores; Eagle not used).
+Validity [A]: exchangeability of S within the window plus job j, checked by Gate 2-L2.
+Known cost of pooling: a user whose jobs are all slow gives small p-values on every node that user
+runs on — handled in Layer 2 (PROMPT 4 addendum).
+Mode A uses the smoothed split p-value p_j = (#{S_i > S_j} + θ_j (1 + #{S_i = S_j})) / (n + 1) (D23).
+Tail checks for every mode (D24): P(p ≤ 1e-3), P(p ≤ 1e-4), and mean f(p) with f = average over
+κ ∈ {0.05, 0.1, 0.25, 0.5} of κ p^(κ−1), compared with its null from 300 simulated U(0,1) samples of
+the same n. ACI for gating = one global stream in D14 order; per-user ACI descriptive only (D25).
+
+**Gate 2-L2 (D26; input to Layer 2).** PM100 main, Mode P, W = 7 d: KS ≤ 0.02; FA within α ± 0.01
+at α ∈ {0.01, 0.05, 0.10}; P(p ≤ 1e-3) ≤ 0.002; mean f(p) ≤ simulated-null 95th percentile;
+global-stream ACI rate within α ± 0.005. Also on PM100 test days ≥ 90 (D21); the same table is
+reported for Eagle main (Eagle does not feed Layer 2). Decile tables (q̂, walltime_req_s) reported,
+not gated. If PM100 Mode P fails Gate 2-L2: STOP and report; no further windows.
+
+**Gate 2 (original; kept and reported, D26).** Checked separately on Eagle and PM100, main population (D17). Mode E (fallback
 grouping, D19) on all post-freeze jobs: KS distance of pooled p-values to uniform ≤ 0.02, and
 empirical false-alarm rate within α ± 0.01 at α ∈ {0.01, 0.05, 0.10}. ACI on Mode A p-values,
-γ = 0.005, per user in end-time order over the test-day jobs: long-run alarm rate within
+γ = 0.005, one global stream in D14 order over the test-day jobs (D25; per-user ACI is descriptive): long-run alarm rate within
 α ± 0.005 over the test period. PM100 sensitivity (D21): Gate 2 is also reported restricted to
 test days ≥ 90 (days 74–89 were used for window selection, D18); L = 45 is not changed by it. If Mode E fails, report per-group drift and switch the
 default to Mode A only with written reasons (Decision Log).
@@ -651,3 +672,8 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D19 | 9 Oct 2026 | Mode E grouping: fallback user → partition → global (n_min = 30) as default; pure per-user streams as a variant; fallback cross-switch independence is [A], tested in Gate 4a | Power for new users vs exact IID validity |
 | D20 | 9 Oct 2026 | Quantile models use UARP settings (200 iterations, lr 0.05, 50 leaves); B-UARP on every split | Cited settings (F10); approved compute (~80 min Eagle) |
 | D21 | 9 Oct 2026 | PM100 Gate 2 also reported restricted to test days ≥ 90 (Mode E: jobs submitted on the Mode A test days, all ≥ day 90; Mode A test days are ≥ 90 by construction): sensitivity check, L = 45 unchanged | Days 74–89 were used for window selection (D18) |
+| D22 | 10 Oct 2026 | Mode P (pooled sliding-window conformal on Mode E scores, W = 7 d main; 6 h / 1 d / 365 d and q̂-decile reported) is the candidate Layer-1 input to Layer 2; warm-up |R_j| < 30 → NaN | Fast-run evidence that per-user streams cause most over-alarming; W = 7 d chosen by the architect on PM100 fast scores (disclosed) |
+| D23 | 10 Oct 2026 | Mode A uses the smoothed (tie-broken) split-conformal p-value | Unsmoothed p-values with ties are non-uniform (PM100 Mode A "all" fast KS 0.30) |
+| D24 | 10 Oct 2026 | Tail checks for every mode: P(p ≤ 1e-3), P(p ≤ 1e-4), mean mixture f(p) vs a 300-sample simulated null | Layer 2 bets with κ down to 0.05; FA at α ≥ 0.01 cannot certify the tail |
+| D25 | 10 Oct 2026 | ACI for the gate = one global stream (D14 order); per-user ACI descriptive only | The per-stream bound (max(α₁,1−α₁)+γ)/(γT) gives no guarantee for short per-user streams (bound as recalled by the architect — paper not in project, needs check) |
+| D26 | 10 Oct 2026 | Gate 2 revised: original Gate 2 kept and reported; Gate 2-L2 (Mode P, W = 7 d, PM100 main; also test days ≥ 90; Eagle reported) gates the Layer-1 input to Layer 2 | Approved by Mahesh in PROMPT 2B |
