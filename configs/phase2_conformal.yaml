@@ -67,7 +67,7 @@ systems:
     phase1_predictions: runs/phase1/20261009-221851-main-full/predictions.parquet  # B-guide
   pm100:
     jobs: data/processed/jobs_pm100.parquet
-    train_days: null              # L, filled from the selection run (D18); see comment when set
+    train_days: 45                # L chosen by D18 rule, run 20261009-232341-pm100-select-main-full
     selection:                    # D18
       candidates: [30, 45, 60]
       first_test_day: 74
