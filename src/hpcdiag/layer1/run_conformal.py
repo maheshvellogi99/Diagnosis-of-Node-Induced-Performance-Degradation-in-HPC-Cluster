@@ -183,6 +183,7 @@ def _mode_a(run: Run, system: str, population: str, fast: bool, base, pop) -> in
         base_idx = TimeIndex.build(base["end_time"], base["submit_time"])
     f = cfg["features"]
 
+    theta_rng = np.random.default_rng(cfg["theta_seed"])     # D23: one generator, split order
     parts, skipped, timing = [], [], []
     for i, t in enumerate(times):
         t0 = time.time()
@@ -199,8 +200,9 @@ def _mode_a(run: Run, system: str, population: str, fast: bool, base, pop) -> in
         s_ca = log_runtime(dca["run_time_s"]) - m90.predict(xca)
         q_te = m90.predict(xte)
         s_te = log_runtime(dte["run_time_s"]) - q_te
+        th = theta_rng.uniform(size=len(te))
         r = mode_a_pvalues(s_ca, dca["user"].to_numpy(), dca["partition"].to_numpy(), s_te,
-                           dte["user"].to_numpy(), dte["partition"].to_numpy(), n_min,
+                           dte["user"].to_numpy(), dte["partition"].to_numpy(), n_min, th,
                            cfg["mode_a"]["bound_alpha"])
         uarp = UARPModel.fit(xtr, dtr["run_time_s"].to_numpy(), cfg["baselines"]["uarp_params"],
                              seed)
@@ -218,7 +220,9 @@ def _mode_a(run: Run, system: str, population: str, fast: bool, base, pop) -> in
         out = dte[["row_id", "job_id", "submit_time", "end_time", "run_time_s", "state_raw",
                    "nodes_req", "walltime_req_s", "user", "partition"]].copy()
         out["split_t"] = t
-        out["q_hat"], out["score"], out["p"] = q_te, s_te, r.p
+        out["q_hat"], out["score"], out["p"], out["theta"] = q_te, s_te, r.p, th
+        out["dec_qhat"], out["dec_wall"] = _deciles(m90.predict(xtr), q_te,
+                                                    dtr["walltime_req_s"], dte["walltime_req_s"])
         out["q50_log"] = m50.predict(xte)
         out["group_key"], out["n_cal"] = r.group_key, r.n_cal
         out["ub_log"] = q_te + r.upper_offset
@@ -268,6 +272,8 @@ def _mode_e(run: Run, system: str, population: str, fast: bool, base, pop) -> in
     df = post[["row_id", "job_id", "submit_time", "end_time", "run_time_s", "state_raw",
                "nodes_req", "walltime_req_s", "user", "partition"]].copy()
     df["q_hat"], df["score"], df["theta"] = q, s, theta
+    df["dec_qhat"], df["dec_wall"] = _deciles(m90.predict(xtr), q, tr["walltime_req_s"],
+                                              post["walltime_req_s"])
     df["q50_log"] = m50.predict(xpost)
     df["p"], df["group_key"], df["p_user"] = r.p_fallback, r.key_fallback, r.p_user
     # test-day membership (same days as Mode A)
@@ -283,6 +289,16 @@ def _mode_e(run: Run, system: str, population: str, fast: bool, base, pop) -> in
                     "post_rows": len(df), "seconds_total": secs})
 
 
+def _deciles(q_train, q_eval, wall_train, wall_eval) -> tuple[np.ndarray, np.ndarray]:
+    """Decile index 0..9 of q_hat and of walltime_req_s, edges from the model's TRAINING rows
+    (Step 1c of PROMPT 2B). searchsorted(side='right') puts values equal to an edge above it."""
+    qs = np.linspace(0.1, 0.9, 9)
+    eq = np.quantile(np.asarray(q_train, float), qs)
+    ew = np.quantile(np.asarray(wall_train, float), qs)
+    return (np.searchsorted(eq, np.asarray(q_eval, float), side="right"),
+            np.searchsorted(ew, np.asarray(wall_eval, float), side="right"))
+
+
 # ----------------------------------------------------------------------------- outputs
 
 
@@ -292,20 +308,26 @@ def _finish(run: Run, system: str, mode: str, population: str, fast: bool, df: p
     a = cfg["alarms"]
     df["alarm_fixed"] = df[pcol] <= a["alpha_job"]
     users = df["user"].astype(str).to_numpy()
-    aci_rates = {}
+    one = np.zeros(len(df), dtype=int)
+    aci_rates, aci_global = {}, {}
     for g in a["aci_gammas"]:
-        al, _ = aci_alarms(df[pcol].to_numpy(), users, a["alpha_job"], g)
-        df[f"alarm_aci_{g:g}"] = al
+        al, _ = aci_alarms(df[pcol].to_numpy(), users, a["alpha_job"], g)   # descriptive (D25)
+        df[f"alarm_aci_peruser_{g:g}"] = al
         aci_rates[f"{g:g}"] = float(al.mean())
-    gdef = f"alarm_aci_{a['aci_gamma_default']:g}"
-    alarm_cols = ["alarm_fixed"] + [f"alarm_aci_{g:g}" for g in a["aci_gammas"]]
+        al, _ = aci_alarms(df[pcol].to_numpy(), one, a["alpha_job"], g)     # gate stream (D25)
+        df[f"alarm_aci_global_{g:g}"] = al
+        aci_global[f"{g:g}"] = float(al.mean())
+    gdef = f"alarm_aci_global_{a['aci_gamma_default']:g}"
+    alarm_cols = ["alarm_fixed"] + [f"alarm_aci_global_{g:g}" for g in a["aci_gammas"]]
+    alarm_cols += [f"alarm_aci_peruser_{g:g}" for g in a["aci_gammas"]]
     alarm_cols += [c for c in ("alarm_guide", "alarm_uarp", "alarm_user") if c in df]
 
     m = {"system": system, "mode": mode, "population": population, "fast": fast, **info,
-         "aci_long_run_rate": aci_rates}
+         "aci_long_run_rate_peruser_descriptive": aci_rates,
+         "aci_long_run_rate_global": aci_global}
     m["main"] = CM.evaluate(df, pcol, cfg, alarm_cols)
     if mode == "A":
-        m["gate2_aci"] = CM.gate2_aci(aci_rates[f"{a['aci_gamma_default']:g}"], cfg)
+        m["gate2_aci"] = CM.gate2_aci(aci_global[f"{a['aci_gamma_default']:g}"], cfg)
     if mode == "E":
         m["gate2_mode_e"] = CM.gate2_mode_e(m["main"], cfg)
         sub = df[df["test_day"]]
@@ -341,7 +363,7 @@ def _finish(run: Run, system: str, mode: str, population: str, fast: bool, df: p
                  run.dir / "figures" / "pvalue_hist.png")
     run.write_json("metrics.json", m)
     key = {"n": m["main"]["n"], "ks": round(m["main"]["ks"], 4), "fa": m["main"]["fa"],
-           "aci": aci_rates}
+           "aci_global": aci_global}
     run.finish("ok", key)
     log.info("done: %s", key)
     return 0

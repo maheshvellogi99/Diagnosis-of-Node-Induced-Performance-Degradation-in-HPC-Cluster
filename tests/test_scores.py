@@ -10,7 +10,7 @@ from hpcdiag.layer1.baselines import guide_alarm, uarp_alarm, user_alarm
 from hpcdiag.layer1.quantile import log_runtime, pinball_loss
 from hpcdiag.layer1.scores import GLOBAL, mode_a_pvalues, mode_e_pvalues
 from hpcdiag.layer1.splits import TimeIndex, mode_a_windows
-from hpcdiag.stats.conformal import smoothed_online_pvalues, split_pvalues
+from hpcdiag.stats.conformal import smoothed_online_pvalues, smoothed_split_pvalues
 
 T0 = pd.Timestamp("2020-01-01")
 
@@ -47,12 +47,13 @@ def test_mode_a_group_fallback():
     test_s = np.array([0.1, 0.2, 0.3, 0.4])
     test_u = np.array(["u1", "u2", "u3", "u4"])
     test_p = np.array(["P", "P", "Q", "R"])
-    r = mode_a_pvalues(cal_s, cal_u, cal_p, test_s, test_u, test_p, n_min=30)
+    th = np.array([0.1, 0.4, 0.7, 0.9])
+    r = mode_a_pvalues(cal_s, cal_u, cal_p, test_s, test_u, test_p, n_min=30, theta=th)
     assert r.group_key.tolist() == ["user:u1", "partition:P", GLOBAL, GLOBAL]
     assert r.n_cal.tolist() == [30, 35, 37, 37]
-    assert r.p[0] == pytest.approx(split_pvalues(cal_s[:30], test_s[:1])[0])
-    assert r.p[1] == pytest.approx(split_pvalues(cal_s[:35], test_s[1:2])[0])
-    assert r.p[2] == pytest.approx(split_pvalues(cal_s, test_s[2:3])[0])
+    assert r.p[0] == pytest.approx(smoothed_split_pvalues(cal_s[:30], test_s[:1], th[:1])[0])
+    assert r.p[1] == pytest.approx(smoothed_split_pvalues(cal_s[:35], test_s[1:2], th[1:2])[0])
+    assert r.p[2] == pytest.approx(smoothed_split_pvalues(cal_s, test_s[2:3], th[2:3])[0])
 
 
 def test_mode_e_streams_and_switch():

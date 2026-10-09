@@ -12,7 +12,11 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from hpcdiag.stats.conformal import OnlineStreams, conformal_upper_offset, split_pvalues
+from hpcdiag.stats.conformal import (
+    OnlineStreams,
+    conformal_upper_offset,
+    smoothed_split_pvalues,
+)
 
 GLOBAL = "global"
 
@@ -35,9 +39,9 @@ class ModeAResult:
 
 def mode_a_pvalues(cal_score: np.ndarray, cal_user: np.ndarray, cal_part: np.ndarray,
                    test_score: np.ndarray, test_user: np.ndarray, test_part: np.ndarray,
-                   n_min: int, alpha_bound: float = 0.1) -> ModeAResult:
-    """Split-conformal p-values; calibration group = test job's user if it has >= n_min
-    calibration jobs, else its partition if >= n_min, else all calibration jobs (global)."""
+                   n_min: int, theta: np.ndarray, alpha_bound: float = 0.1) -> ModeAResult:
+    """Smoothed split-conformal p-values (D23); calibration group = test job's user if it has
+    >= n_min calibration jobs, else its partition if >= n_min, else all calibration jobs."""
     cal = pd.DataFrame({"s": cal_score, "u": cal_user, "p": cal_part})
     by_user = {k: v.to_numpy() for k, v in cal.groupby("u", sort=False)["s"]}
     by_part = {k: v.to_numpy() for k, v in cal.groupby("p", sort=False)["s"]}
@@ -56,7 +60,7 @@ def mode_a_pvalues(cal_score: np.ndarray, cal_user: np.ndarray, cal_part: np.nda
             ref, k = by_part[part], partition_key(part)
         else:
             ref, k = glob, GLOBAL
-        p[idx] = split_pvalues(ref, test["s"].to_numpy()[idx])
+        p[idx] = smoothed_split_pvalues(ref, test["s"].to_numpy()[idx], np.asarray(theta)[idx])
         key[idx] = k
         ncal[idx] = len(ref)
         off[idx] = conformal_upper_offset(ref, alpha_bound) if len(ref) else np.inf

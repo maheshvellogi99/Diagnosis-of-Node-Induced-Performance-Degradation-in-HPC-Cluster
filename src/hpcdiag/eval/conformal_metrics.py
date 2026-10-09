@@ -87,6 +87,15 @@ def evaluate(df: pd.DataFrame, pcol: str, cfg: dict, alarm_cols: list[str]) -> d
         "alarms_by_bin": {c: rate_by_bin(df[c].to_numpy(), y, ev["bins_hours"], ev["bin_labels"])
                           for c in alarm_cols},
     }
+    for col, label in (("dec_qhat", "q_hat (model prediction)"),
+                       ("dec_wall", "walltime_req_s (known at submit)")):
+        if col in df:
+            d = df[col].to_numpy()
+            out[f"fa_by_{col}_alpha_job"] = {
+                "key": f"decile of {label}; edges from the model's training rows",
+                "rows": [{"decile": k + 1, "n": int((d == k).sum()),
+                          "fa": float(np.mean(p[d == k] <= a["alpha_job"])) if (d == k).any()
+                          else float("nan")} for k in range(10)]}
     if "q50_log" in df:
         out["tare_median_model"] = tare_metrics(
             y, np.exp(df["q50_log"].to_numpy()), df["nodes_req"].to_numpy(),
