@@ -21,7 +21,12 @@ import xgboost
 from hpcdiag.eval import metrics as M
 from hpcdiag.eval.plots import pred_vs_actual_by_bin
 from hpcdiag.layer1 import data as D
-from hpcdiag.layer1.baseline import config_fingerprint, run_split, summarise_predictions
+from hpcdiag.layer1.baseline import (
+    base_score,
+    config_fingerprint,
+    run_split,
+    summarise_predictions,
+)
 from hpcdiag.layer1.splits import TimeIndex, fast_subset, split_times
 from hpcdiag.utils.checksums import verify
 from hpcdiag.utils.run import Run, resolve, run_guarded, start_run
@@ -105,7 +110,8 @@ def _run(run: Run, variant_name: str, fast: bool) -> int:
             "n_pred_lt_1s": int((yh < 1).sum()),
             "users_train": res.n_classes["user"], "partitions_train": res.n_classes["partition"],
             "unseen_user_test": res.unseen_test["user"],
-            "unseen_partition_test": res.unseen_test["partition"], "seconds": dt_s,
+            "unseen_partition_test": res.unseen_test["partition"],
+            "base_score": base_score(res.config), "seconds": dt_s,
         })
         preds.append(p)
         fit_times.append(dt_s)

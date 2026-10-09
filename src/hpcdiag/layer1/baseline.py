@@ -64,8 +64,19 @@ def run_split(df: pd.DataFrame, index: TimeIndex, t: pd.Timestamp, train_days: f
                        booster_config(model))
 
 
+def base_score(cfg: dict) -> float:
+    """Intercept stored in the booster config. In xgboost 3.2.0 it is estimated from each
+    training set, so it differs between splits (observed in Phase 1). 1.7.1 is believed to use a
+    fixed 0.5 (xgboost 2.0 release notes) — not verified in this repo."""
+    v = cfg["learner"]["learner_model_param"]["base_score"]
+    return float(v.strip("[]")) if isinstance(v, str) else float(v)
+
+
 def config_fingerprint(cfg: dict) -> str:
-    return json.dumps(cfg, sort_keys=True)
+    """Config identity across splits, ignoring the data-dependent base_score."""
+    c = json.loads(json.dumps(cfg))
+    c["learner"]["learner_model_param"].pop("base_score", None)
+    return json.dumps(c, sort_keys=True)
 
 
 def summarise_predictions(y: np.ndarray, yhat: np.ndarray) -> dict:

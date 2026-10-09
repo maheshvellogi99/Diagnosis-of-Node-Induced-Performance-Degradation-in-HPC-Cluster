@@ -10,7 +10,7 @@ import pytest
 import xgboost
 
 from hpcdiag.layer1 import data as D
-from hpcdiag.layer1.baseline import make_model, run_split
+from hpcdiag.layer1.baseline import base_score, config_fingerprint, make_model, run_split
 from hpcdiag.layer1.splits import TimeIndex
 
 NUM = ["walltime_req_s", "procs_req", "mem_req", "nodes_req", "gpus_req"]
@@ -49,6 +49,18 @@ def test_run_split_deterministic_and_config_saved():
     assert r1.train_end_max < t
     assert "learner" in r1.config  # booster save_config() content
     assert set(r1.predictions.columns) == {"row_id", "y", "yhat", "nodes_req"}
+
+
+def test_config_fingerprint_ignores_only_base_score():
+    df = _df()
+    idx = TimeIndex.build(df["end_time"], df["submit_time"])
+    a = run_split(df, idx, pd.Timestamp("2020-04-15"), 100, 1, NUM, CAT, "run_time_s").config
+    b = run_split(df, idx, pd.Timestamp("2020-05-15"), 100, 1, NUM, CAT, "run_time_s").config
+    assert base_score(a) != base_score(b)            # estimated from data in xgboost >= 2
+    assert config_fingerprint(a) == config_fingerprint(b)
+    c = run_split(df, idx, pd.Timestamp("2020-04-15"), 100, 1, NUM, CAT, "run_time_s",
+                  params={"max_depth": 3}).config
+    assert config_fingerprint(a) != config_fingerprint(c)
 
 
 def test_run_split_empty_returns_none():
