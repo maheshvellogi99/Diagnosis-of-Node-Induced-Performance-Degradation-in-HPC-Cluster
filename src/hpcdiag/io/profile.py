@@ -50,7 +50,7 @@ def common_profile(con, jobs: Path, quantiles: list[float], top_users: int) -> d
     schema = pq.read_schema(jobs)
     m: dict[str, Any] = {"schema": [(f.name, str(f.type)) for f in schema]}
     m["counts"] = _one(con, f"""
-        select count(*) rows, count(distinct job_id) distinct_job_ids,
+        select count(*) n_rows, count(distinct job_id) distinct_job_ids,
                count(distinct "user") users, count(distinct partition) partitions,
                count(distinct qos) qos_values from {J}""")
     m["date_range"] = _one(con, f"""
@@ -204,7 +204,7 @@ def pm100_profile(con, raw: Path, jobs: Path, job_nodes: Path) -> dict[str, Any]
     m["shared_counts"] = _rows(
         con, f"select shared, count(*) n from {R} group by 1 order by 2 desc")
     m["job_nodes"] = _one(con, f"""
-        select count(*) rows, count(distinct node_id) distinct_nodes,
+        select count(*) n_rows, count(distinct node_id) distinct_nodes,
                count(distinct job_id) distinct_jobs, min(node_id) min_node_id,
                max(node_id) max_node_id from {N}""")
     m["job_nodes_vs_jobs"] = _one(con, f"""
