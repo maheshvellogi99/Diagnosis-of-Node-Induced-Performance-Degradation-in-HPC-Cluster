@@ -295,7 +295,7 @@ def _kv(d: dict[str, Any]) -> str:
 
 
 def _common_sections(c: dict[str, Any]) -> str:
-    s = "## Row counts\n\n" + _kv(c["counts"])
+    s = "\n## Row counts\n\n" + _kv(c["counts"])
     s += "\nRepeated job_id values:\n\n" + _kv(c["duplicate_job_ids"])
     s += "\n## Date range (UTC-naive)\n\n" + _kv(c["date_range"])
     s += "\n## Raw state counts (`state_raw`)\n\n" + _table(c["state_raw_counts"])
