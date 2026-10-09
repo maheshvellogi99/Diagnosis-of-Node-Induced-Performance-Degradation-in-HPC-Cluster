@@ -44,6 +44,14 @@ def _q(path: Path) -> str:
     return "'" + str(path).replace("'", "''") + "'"
 
 
+GAP_SQL = """
+    with s as (select submit_time t, lead(submit_time) over (order by submit_time) nxt
+               from {J})
+    select t as last_submit_before_gap, nxt as next_submit,
+           round((epoch(nxt) - epoch(t)) / 3600, 1) as gap_hours
+    from s where nxt is not null order by nxt - t desc, t limit 5"""
+
+
 def common_profile(con, jobs: Path, quantiles: list[float], top_users: int) -> dict[str, Any]:
     """Profile of a processed jobs_<system>.parquet (contract columns)."""
     J = _q(jobs)
@@ -97,6 +105,7 @@ def common_profile(con, jobs: Path, quantiles: list[float], top_users: int) -> d
         select partition, count(*) n from {J} group by 1 order by 2 desc, 1""")
     m["qos_counts"] = _rows(con, f"""
         select qos, count(*) n from {J} group by 1 order by 2 desc, 1""")
+    m["largest_submit_gaps"] = _rows(con, GAP_SQL.format(J=J))
     m["duplicate_job_ids"] = _one(con, f"""
         with d as (select job_id, count(*) k from {J} group by 1 having count(*) > 1)
         select count(*) ids_repeated, coalesce(sum(k), 0) rows_on_repeated_ids,
@@ -312,6 +321,9 @@ def _common_sections(c: dict[str, Any]) -> str:
     s += f"\nTop {len(c['top_users'])} users (all rows):\n\n" + _table(c["top_users"])
     s += "\n## Partition counts\n\n" + _table(c["partition_counts"])
     s += "\n## QOS counts\n\n" + _table(c["qos_counts"])
+    s += ("\n## Largest gaps between consecutive submissions (all rows, UTC-naive)\n\n"
+          "Found with (duckdb, `SET TimeZone='UTC'`; `{J}` = processed jobs table):\n\n```sql"
+          + GAP_SQL + "\n```\n\n" + _table(c["largest_submit_gaps"]))
     return s
 
 

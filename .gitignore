@@ -9,3 +9,5 @@ __pycache__/
 .hypothesis/
 .DS_Store
 .ipynb_checkpoints/
+# Claude Code /export transcripts (local only)
+*-local-command-caveat*.txt

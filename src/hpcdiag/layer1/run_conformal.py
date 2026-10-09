@@ -310,6 +310,8 @@ def _finish(run: Run, system: str, mode: str, population: str, fast: bool, df: p
         m["gate2_mode_e"] = CM.gate2_mode_e(m["main"], cfg)
         sub = df[df["test_day"]]
         m["test_days_only"] = CM.evaluate(sub, pcol, cfg, alarm_cols)
+        # D21: Gate 2 restricted to the Mode A test days (PM100: days >= 90); sensitivity only
+        m["gate2_mode_e_test_days_sensitivity"] = CM.gate2_mode_e(m["test_days_only"], cfg)
         al, _ = aci_alarms(df[pcol_variant].to_numpy(), users, a["alpha_job"],
                            a["aci_gamma_default"])
         df["alarm_fixed_user_only"] = df[pcol_variant] <= a["alpha_job"]

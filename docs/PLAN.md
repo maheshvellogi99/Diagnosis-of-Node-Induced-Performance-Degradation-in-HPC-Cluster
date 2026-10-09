@@ -400,7 +400,8 @@ Mode E is reported on (i) all post-freeze jobs and (ii) the Mode A test days.
 grouping, D19) on all post-freeze jobs: KS distance of pooled p-values to uniform ≤ 0.02, and
 empirical false-alarm rate within α ± 0.01 at α ∈ {0.01, 0.05, 0.10}. ACI on Mode A p-values,
 γ = 0.005, per user in end-time order over the test-day jobs: long-run alarm rate within
-α ± 0.005 over the test period. If Mode E fails, report per-group drift and switch the
+α ± 0.005 over the test period. PM100 sensitivity (D21): Gate 2 is also reported restricted to
+test days ≥ 90 (days 74–89 were used for window selection, D18); L = 45 is not changed by it. If Mode E fails, report per-group drift and switch the
 default to Mode A only with written reasons (Decision Log).
 
 **Note.** Eagle has no node list, so Layer 1 is first built and validated on Eagle,
@@ -649,3 +650,4 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D18 | 9 Oct 2026 | PM100 window selection rule (Phase 2.7): shared test days 74–89, Mode A daily, lowest pooled pinball loss at τ = 0.9 on log runtime, ties within 1% → shorter window; never looks at p-values or anything after day 90 | PM100 spans 162 days (D15); rule fixed before running |
 | D19 | 9 Oct 2026 | Mode E grouping: fallback user → partition → global (n_min = 30) as default; pure per-user streams as a variant; fallback cross-switch independence is [A], tested in Gate 4a | Power for new users vs exact IID validity |
 | D20 | 9 Oct 2026 | Quantile models use UARP settings (200 iterations, lr 0.05, 50 leaves); B-UARP on every split | Cited settings (F10); approved compute (~80 min Eagle) |
+| D21 | 9 Oct 2026 | PM100 Gate 2 also reported restricted to test days ≥ 90 (Mode E: jobs submitted on the Mode A test days, all ≥ day 90; Mode A test days are ≥ 90 by construction): sensitivity check, L = 45 unchanged | Days 74–89 were used for window selection (D18) |
