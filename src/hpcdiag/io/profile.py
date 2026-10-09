@@ -90,7 +90,7 @@ def common_profile(con, jobs: Path, quantiles: list[float], top_users: int) -> d
                quantile_cont(n, 0.90) p90, max(n) max,
                count(*) filter (where n < 30) users_lt_30_jobs from u""")
     m["top_users"] = _rows(con, f"""
-        select "user", count(*) n, count(*) / (select count(*) from {J}) share
+        select "user", count(*) n, count(*) / (select count(*) from {J}) as share
         from {J} group by 1 order by 2 desc, 1 limit {int(top_users)}""")
     m["partition_counts"] = _rows(con, f"""
         select partition, count(*) n from {J} group by 1 order by 2 desc, 1""")
