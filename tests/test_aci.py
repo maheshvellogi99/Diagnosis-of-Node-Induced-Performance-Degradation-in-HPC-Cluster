@@ -23,9 +23,9 @@ def test_aci_groups_have_separate_state():
 @pytest.mark.parametrize("gamma, T", [(0.001, 200_000), (0.005, 50_000), (0.01, 30_000)])
 def test_aci_long_run_rate_under_drift(gamma, T):
     """Gibbs & Candès Prop. 4.1: |mean err - alpha| <= (max(alpha_1, 1 - alpha_1) + gamma)/(gamma T)
-    for ANY sequence, here p-values that drift from too small to too large."""
+    for ANY sequence, here p-values that drift from too small towards uniform."""
     rng = np.random.default_rng(5)
-X
+    a = np.linspace(0.3, 1.0, T)   # Beta(a, 1), a < 1: p-values too small, drifting to U(0, 1)
     p = rng.beta(a, 1.0)
     alpha = 0.05
     alarm, _ = aci_alarms(p, np.zeros(T, dtype=int), alpha, gamma)
