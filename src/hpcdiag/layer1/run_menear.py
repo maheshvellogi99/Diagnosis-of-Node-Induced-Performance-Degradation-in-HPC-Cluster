@@ -83,12 +83,15 @@ def _run(run: Run, variant_name: str, fast: bool) -> int:
     index = TimeIndex.build(df["end_time"], df["submit_time"])
     load_s = time.time() - t0
 
+    params = {**(cfg["model"]["params"] or {}), **(variant.get("model_params") or {})}
+    sensitivity_only = bool(variant.get("sensitivity_only", False))
+    log.info("model params: %s%s", params or "defaults",
+             " (SENSITIVITY ONLY)" if sensitivity_only else "")
     per_split, preds, cfg_ref, fit_times = [], [], None, []
     for i, t in enumerate(times):
         ts = time.time()
         res = run_split(df, index, t, scfg["train_days"], scfg["test_days"], fcfg["numeric"],
-                        fcfg["categorical"], cfg["target"], fcfg["unseen_code"],
-                        cfg["model"]["params"])
+                        fcfg["categorical"], cfg["target"], fcfg["unseen_code"], params)
         dt_s = time.time() - ts
         if res is None:
             log.warning("split %s skipped: empty train or test", t)
@@ -134,7 +137,7 @@ def _run(run: Run, variant_name: str, fast: bool) -> int:
 
     m = {
         "variant": variant_name, "fast": fast, "xgboost_version": xgboost.__version__,
-        "model_params": cfg["model"]["params"],
+        "model_params": params, "sensitivity_only": sensitivity_only,
         "n_splits_full_list": len(times_all), "n_splits_used": len(ps),
         "first_split": times_all[0], "last_split": times_all[-1],
         "split_times_used": [str(t) for t in ps["split_t"]],

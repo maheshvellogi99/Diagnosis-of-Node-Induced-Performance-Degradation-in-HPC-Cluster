@@ -19,6 +19,10 @@ variants:
   main: {}                                         # no runtime filter (paper states none)
   v1_rt30: {min_run_time_s_exclusive: 30}          # TARE convention (F20): run_time_s > 30
   v2_nodup: {drop_exact_duplicates: true}          # D10: drop rows identical to an earlier raw row
+  # SENSITIVITY ONLY (pre-registered rule 3, reports/phase_1.md §0): main filter, one model
+  # parameter changed; cannot change the Gate 1 outcome.
+  sens_approx: {model_params: {tree_method: approx}, sensitivity_only: true}
+  sens_base05: {model_params: {base_score: 0.5}, sensitivity_only: true}
 
 features:                                          # PLAN Phase 1 (D6), addendum B
   numeric: [walltime_req_s, procs_req, mem_req, nodes_req, gpus_req]
