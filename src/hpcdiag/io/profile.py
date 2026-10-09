@@ -227,14 +227,14 @@ def pm100_profile(con, raw: Path, jobs: Path, job_nodes: Path) -> dict[str, Any]
     # jobs per node per day: job counted on each of its nodes, on the UTC day it started.
     m["jobs_per_node_per_day"] = _one(con, f"""
         with c as (select node_id, cast(start_time as date) d, count(*) n from {N} group by 1, 2),
-             days as (select unnest(generate_series(
+             dd as (select unnest(generate_series(
                          (select min(cast(start_time as date)) from {N}),
                          (select max(cast(start_time as date)) from {N}),
                          interval 1 day))::date d),
-             nodes as (select distinct node_id from {N}),
-             grid as (select nodes.node_id, days.d, coalesce(c.n, 0) n
-                      from nodes cross join days left join c using (node_id, d))
-        select (select count(*) from days) days, (select count(*) from nodes) nodes,
+             nn as (select distinct node_id from {N}),
+             grid as (select nn.node_id, dd.d, coalesce(c.n, 0) n
+                      from nn cross join dd left join c using (node_id, d))
+        select (select count(*) from dd) as n_days, (select count(*) from nn) as n_nodes,
                count(*) node_days,
                quantile_cont(n, 0.10) p10_incl_zero, median(n) median_incl_zero,
                quantile_cont(n, 0.90) p90_incl_zero, avg(n) mean_incl_zero,
@@ -243,7 +243,7 @@ def pm100_profile(con, raw: Path, jobs: Path, job_nodes: Path) -> dict[str, Any]
                (select median(n) from c) median_nonzero,
                (select quantile_cont(n, 0.90) from c) p90_nonzero,
                (select avg(n) from c) mean_nonzero,
-               (select min(d) from days) first_day, (select max(d) from days) last_day
+               (select min(d) from dd) as first_day, (select max(d) from dd) as last_day
         from grid""")
     # Q2 overlaps: per node, sort by (start, end); job overlaps if it starts strictly before the
     # latest end time among earlier jobs on that node.
