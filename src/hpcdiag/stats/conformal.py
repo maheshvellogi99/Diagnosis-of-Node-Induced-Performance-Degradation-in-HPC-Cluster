@@ -6,6 +6,7 @@ exchangeable with the reference jobs"; small p = abnormally late.
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Hashable
 
 import numpy as np
@@ -68,3 +69,58 @@ def conformal_upper_offset(cal_scores: np.ndarray, alpha: float) -> float:
     n = len(cal)
     k = int(np.ceil((1 - alpha) * (n + 1)))
     return float("inf") if k > n else float(cal[k - 1])
+
+
+def smoothed_split_pvalues(cal_scores: np.ndarray, test_scores: np.ndarray,
+                           theta: np.ndarray) -> np.ndarray:
+    """Smoothed split-conformal p-values (Mode A, D23):
+    p_j = (#{i in C : S_i > S_j} + theta_j (1 + #{i in C : S_i = S_j})) / (|C| + 1)."""
+    cal = np.sort(np.asarray(cal_scores, dtype="float64"))
+    t = np.asarray(test_scores, dtype="float64")
+    th = np.asarray(theta, dtype="float64")
+    if t.shape != th.shape:
+        raise ValueError("test_scores and theta must have the same shape")
+    right = np.searchsorted(cal, t, side="right")
+    n_gt = len(cal) - right
+    n_eq = right - np.searchsorted(cal, t, side="left")
+    return (n_gt + th * (1.0 + n_eq)) / (len(cal) + 1.0)
+
+
+def sliding_window_pvalues(scores: np.ndarray, end_ns: np.ndarray, theta: np.ndarray,
+                           window_ns: int, min_ref: int,
+                           keys: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Mode P (D22): pooled sliding-window smoothed conformal p-values.
+
+    Inputs must be in D14 order (end_time, then row_id). For job j the reference set R_j is all
+    EARLIER jobs (same key, if keys are given) with end_time >= end_time_j - window:
+        p_j = (#{i in R_j : S_i > S_j} + theta_j (1 + #{i in R_j : S_i = S_j})) / (|R_j| + 1).
+    If |R_j| < min_ref, p_j = NaN (warm-up). Returns (p, |R_j|)."""
+    s = np.asarray(scores, dtype="float64")
+    e = np.asarray(end_ns, dtype="int64")
+    th = np.asarray(theta, dtype="float64")
+    if not (s.shape == e.shape == th.shape):
+        raise ValueError("scores, end_ns and theta must have the same shape")
+    if len(e) > 1 and np.any(np.diff(e) < 0):
+        raise ValueError("end times must be non-decreasing (D14 order)")
+    k = np.zeros(len(s), dtype=np.int64) if keys is None else np.asarray(keys)
+    state: dict = {}
+    p = np.full(len(s), np.nan)
+    nref = np.zeros(len(s), dtype="int64")
+    for j in range(len(s)):
+        st = state.get(k[j])
+        if st is None:
+            st = state[k[j]] = (SortedList(), deque())
+        sl, dq = st
+        lo = e[j] - window_ns
+        while dq and dq[0][0] < lo:
+            sl.remove(dq.popleft()[1])
+        m = len(sl)
+        nref[j] = m
+        if m >= min_ref:
+            right = sl.bisect_right(s[j])
+            n_gt = m - right
+            n_eq = right - sl.bisect_left(s[j])
+            p[j] = (n_gt + th[j] * (1.0 + n_eq)) / (m + 1.0)
+        sl.add(s[j])
+        dq.append((e[j], s[j]))
+    return p, nref
