@@ -1,0 +1,79 @@
+# Phase 2 — Layer 1: quantile model + conformal p-values + ACI.
+# Sources: PLAN.md §9 Phase 2 (2.1–2.7), §10; F10–F12, F19; D7, D14, D17–D20; PROMPT 2 addendum.
+seed: 0
+theta_seed: 12345                 # separate generator for the conformal tie-breaker (PLAN §7.3)
+
+raw_dir: data/raw
+checksums_file: data/raw/CHECKSUMS.txt
+
+filters:
+  states: [COMPLETED, TIMEOUT]    # D5
+  require_walltime: true
+
+populations:                      # D17
+  main: {min_run_time_s_exclusive: 30}
+  all: {}
+
+features:                         # same as Phase 1 (D6)
+  numeric: [walltime_req_s, procs_req, mem_req, nodes_req, gpus_req]
+  categorical: [user, partition]
+  unseen_code: -1
+
+quantile:                         # 2.1, D20
+  taus: {upper: 0.9, median: 0.5}
+  lgbm_params: {n_estimators: 200, learning_rate: 0.05, num_leaves: 50}   # UARP settings (F10)
+
+groups:                           # D7
+  n_min: 30
+
+mode_a:                           # 2.3, addendum B
+  cal_days: 14
+  test_days: 1
+  bound_alpha: 0.10               # CQR upper bound reported for coverage/width
+
+alarms:                           # 2.4
+  alphas: [0.01, 0.05, 0.10]
+  alpha_job: 0.05
+  aci_gammas: [0.001, 0.005, 0.01]
+  aci_gamma_default: 0.005
+
+baselines:                        # 2.5
+  guide_threshold: 0.20
+  guide_clip_pred_min_s: 1.0
+  uarp_params: {n_estimators: 200, learning_rate: 0.05, num_leaves: 50}
+
+evaluation:
+  bins_hours: [0, 1, 6, 24, 48]
+  bin_labels: ["0-1h", "1-6h", "6-24h", "1-2d", ">2d"]
+  top_users_ks: 5
+  resource_key: "nodes_req x walltime_req_s (known at submission; differs from TARE c_i = nodes_req x actual run time)"
+  tare_min_run_time_s_exclusive: 30
+  tare_clip_pred_min_s: 1.0
+
+gate2:
+  ks_max: 0.02
+  fa_tol: 0.01                    # |FA - alpha| <= 0.01 at each alpha (Mode E)
+  aci_tol: 0.005                  # |long-run alarm rate - alpha_job| <= 0.005 (ACI on Mode A, gamma 0.005)
+
+fast_mode:
+  n_splits: 12                    # Mode A: evenly spaced over the split list
+  mode_e_days_after_freeze: 180   # Mode E: only jobs ending within this many days after the freeze
+
+systems:
+  eagle:
+    jobs: data/processed/jobs_eagle.parquet
+    train_days: 100               # Mode A training length; Mode E freeze prefix
+    splits: {first_split_offset_days: 100, split_every_days: 6, test_days: 1}   # = Phase 1
+    phase1_predictions: runs/phase1/20261009-221851-main-full/predictions.parquet  # B-guide
+  pm100:
+    jobs: data/processed/jobs_pm100.parquet
+    train_days: null              # L, filled from the selection run (D18); see comment when set
+    selection:                    # D18
+      candidates: [30, 45, 60]
+      first_test_day: 74
+      n_test_days: 16             # days 74..89
+      horizon_days: 90
+      tau: 0.9
+      tie_rel: 0.01
+    mode_a_first_day: 90          # Mode A daily from start + 90 d
+    split_every_days: 1

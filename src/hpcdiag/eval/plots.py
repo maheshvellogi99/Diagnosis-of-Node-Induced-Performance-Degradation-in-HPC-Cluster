@@ -106,3 +106,36 @@ def rmse_over_time(split_t: pd.Series, rmse_h: pd.Series, band: tuple[float, flo
     fig.savefig(out, dpi=150, facecolor=SURFACE)
     plt.close(fig)
     return out
+
+
+def pvalue_hists(p: np.ndarray, users: np.ndarray, k: int, title: str, out: Path) -> Path:
+    """Histogram of p-values (density, 20 bins): pooled + the k users with most jobs.
+    Uniform p-values give bars at height 1 (dashed line)."""
+    p = np.asarray(p, float)
+    u = pd.Series(np.asarray(users, dtype=object))
+    top = u.value_counts().head(k)
+    panels = [("all jobs", np.ones(len(p), bool))] + [
+        (f"user {name}", (u == name).to_numpy()) for name in top.index]
+    ncol = 3
+    nrow = int(np.ceil(len(panels) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(11, 3.1 * nrow), squeeze=False)
+    fig.patch.set_facecolor(SURFACE)
+    bins = np.linspace(0, 1, 21)
+    for ax, (name, m) in zip(axes.ravel(), panels, strict=False):
+        ax.hist(p[m], bins=bins, density=True, color=SERIES_1, edgecolor=SURFACE, linewidth=1)
+        ax.axhline(1.0, color=INK_2, lw=1, ls="--")
+        ax.set_title(f"{name} (n={int(m.sum()):,})", color=INK, fontsize=9, loc="left")
+        ax.set_xlim(0, 1)
+        _style(ax)
+    for ax in axes.ravel()[len(panels):]:
+        ax.set_visible(False)
+    for ax in axes[-1]:
+        ax.set_xlabel("p-value")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("density (uniform = 1)")
+    fig.suptitle(title, color=INK, fontsize=11, x=0.01, ha="left")
+    fig.tight_layout()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=150, facecolor=SURFACE)
+    plt.close(fig)
+    return out
