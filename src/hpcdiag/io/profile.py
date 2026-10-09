@@ -19,7 +19,7 @@ import pyarrow.parquet as pq
 from hpcdiag.io import eagle as eagle_io
 from hpcdiag.io import pm100 as pm100_io
 from hpcdiag.utils.checksums import read_checksums, verify
-from hpcdiag.utils.run import resolve, start_run
+from hpcdiag.utils.run import Run, resolve, run_guarded, start_run
 
 # ----------------------------------------------------------------------------- helpers
 
@@ -50,7 +50,8 @@ def common_profile(con, jobs: Path, quantiles: list[float], top_users: int) -> d
     schema = pq.read_schema(jobs)
     m: dict[str, Any] = {"schema": [(f.name, str(f.type)) for f in schema]}
     m["counts"] = _one(con, f"""
-        select count(*) n_rows, count(distinct job_id) distinct_job_ids,
+        select count(*) n_rows, count(distinct row_id) distinct_row_ids,
+               count(distinct job_id) distinct_job_ids,
                count(distinct "user") users, count(distinct partition) partitions,
                count(distinct qos) qos_values from {J}""")
     m["date_range"] = _one(con, f"""
@@ -305,7 +306,7 @@ def _common_sections(c: dict[str, Any]) -> str:
     s += _kv(c["run_time_quantiles_all"])
     s += "\nCOMPLETED + TIMEOUT only:\n\n" + _kv(c["run_time_quantiles_completed_timeout"])
     s += "\n## Requested walltime (`walltime_req_s`, seconds)\n\n" + _kv(c["walltime_req_s"])
-    s += "\n## `mem_req` (source units)\n\n" + _kv(c["mem_req"])
+    s += "\n## `mem_req` (source units, unknown; D12)\n\n" + _kv(c["mem_req"])
     s += "\n## Per-user job counts\n\nAll rows:\n\n" + _kv(c["jobs_per_user"])
     s += "\nCOMPLETED + TIMEOUT only:\n\n" + _kv(c["jobs_per_user_completed_timeout"])
     s += f"\nTop {len(c['top_users'])} users (all rows):\n\n" + _table(c["top_users"])
@@ -319,8 +320,13 @@ def _schema_section(c: dict[str, Any], mapping: dict[str, str]) -> str:
     return "## Schema (`" + "jobs contract, PLAN.md §3.1" + "`)\n\n" + _table(rows)
 
 
+MEM_NOTE = ("- `mem_req`: units UNKNOWN for both systems; values are used as-is and never "
+            "converted; only tree models use them, which are scale-invariant (D12).\n\n")
+
+
 EAGLE_MAP = {
-    "job_id": "job_id (NOT unique, see below)",
+    "row_id": "position in raw file, 0-based; unique key (D10)",
+    "job_id": "job_id as given (NOT unique, see below)",
     "system": "constant 'eagle'",
     "user": "user", "partition": "partition", "qos": "qos", "account": "account",
     "name": "name",
@@ -329,13 +335,14 @@ EAGLE_MAP = {
     "run_time_s": "run_time, seconds (F4)",
     "walltime_req_s": "wallclock_req, seconds (F4)",
     "nodes_req": "nodes_req", "procs_req": "processors_req", "gpus_req": "gpus_req",
-    "mem_req": "mem_req, units UNKNOWN — needs check (not stated in sources we hold)",
+    "mem_req": "mem_req, units UNKNOWN; used as-is (D12)",
     "state": "state -> COMPLETED / TIMEOUT / other", "state_raw": "state (D9)",
     "censored": "state == TIMEOUT",
 }
 
 PM100_MAP = {
-    "job_id": "job_id",
+    "row_id": "position in raw file, 0-based; unique key (D10)",
+    "job_id": "job_id (unique in PM100)",
     "system": "constant 'pm100'",
     "user": "user_id (int, anonymised; cast to str)",
     "partition": "partition (anonymised code)", "qos": "qos (anonymised code)",
@@ -346,7 +353,7 @@ PM100_MAP = {
     "run_time_s": "run_time, seconds (F8)",
     "walltime_req_s": "time_limit minutes x 60; INFINITE -> null (F8)",
     "nodes_req": "num_nodes_req", "procs_req": "num_cores_req", "gpus_req": "num_gpus_req",
-    "mem_req": "mem_req, units UNKNOWN — needs check (F8 does not state units)",
+    "mem_req": "mem_req, units UNKNOWN; used as-is (D12)",
     "state": "job_state -> COMPLETED / TIMEOUT / other", "state_raw": "job_state (D9)",
     "censored": "state == TIMEOUT",
 }
@@ -371,14 +378,17 @@ def render_eagle_card(m: dict[str, Any], run_id: str, sums: dict) -> str:
     s += _schema_section(c, EAGLE_MAP)
     s += "\n## Units\n\n- Times: UTC-naive timestamps as stored.\n"
     s += "- `run_time_s`, `walltime_req_s`: seconds (F4).\n"
-    s += "- `mem_req`: source units, UNKNOWN — needs check.\n\n"
+    s += MEM_NOTE
     s += _common_sections(c)
-    s += "\n## Repeated job_id (contract says unique within system)\n\n"
+    s += "\n## Repeated job_id (unique key is `row_id`, D10)\n\n"
     s += _kv(e["exact_duplicate_rows"])
     s += ("\n`exact_copies` = rows on repeated ids that are identical to another row in all 18 "
           "raw columns. Rows on a repeated id share user and name; they look like Slurm array "
           "tasks with the array index missing, but the dataset documentation we hold does not "
-          "say so — UNKNOWN — needs check.\n")
+          "say so — UNKNOWN — needs check.\n\n"
+          "Decision D10: `row_id` (position in the raw file) is the unique key; `job_id` is kept "
+          "as given. Phase 1 main run keeps these rows; a sensitivity variant drops exact "
+          "duplicate rows.\n")
     return s
 
 
@@ -398,8 +408,8 @@ def render_pm100_card(m: dict[str, Any], run_id: str, sums: dict, licence: str) 
               f"size {sha[2]:,} bytes\n")
     s += ("- Processed: `data/processed/jobs_pm100.parquet`, "
           "`data/processed/job_nodes_pm100.parquet` (lossless, D8)\n")
-    s += (f"- Raw rows: {p['raw_rows']:,}. PLAN.md F7 (Zenodo page) says 231,116 jobs — "
-          f"{'match' if p['raw_rows'] == 231116 else 'MISMATCH'}.\n\n")
+    s += (f"- Raw rows: {p['raw_rows']:,}. The Zenodo description says 231,116 jobs; the "
+          "md5-verified file is used (F7 corrected, D11).\n\n")
     s += "## Raw schema\n\n" + _table([{"column": n, "type": t} for n, t in p["raw_schema"]])
     s += "\nColumns loaded: " + ", ".join(f"`{x}`" for x in p["columns_used"]) + ".\n\n"
     s += _schema_section(c, PM100_MAP)
@@ -410,9 +420,10 @@ def render_pm100_card(m: dict[str, Any], run_id: str, sums: dict, licence: str) 
           f"{p['raw_checks']['time_limit_max_minutes']} min; "
           f"{p['raw_checks']['time_limit_null']} nulls; no `INFINITE` values can occur in an "
           "int64 column. The converter still maps `INFINITE` -> null (unit-tested).\n")
-    s += "- `mem_req`: source units, UNKNOWN — needs check.\n\n"
+    s += MEM_NOTE
     s += "## Raw consistency checks\n\n" + _kv(p["raw_checks"])
-    s += "\n`shared` column (raw) counts:\n\n" + _table(p["shared_counts"])
+    s += ("\n`shared` column (raw) counts. Semantics UNKNOWN; the column is not used "
+          "(D14):\n\n") + _table(p["shared_counts"])
     s += _common_sections(c)
     s += "\n## Nodes (`job_nodes_pm100.parquet`)\n\n" + _kv(p["job_nodes"])
     s += "\nRow count check:\n\n" + _kv(p["job_nodes_vs_jobs"])
@@ -426,14 +437,17 @@ def render_pm100_card(m: dict[str, Any], run_id: str, sums: dict, licence: str) 
     s += "\n## Overlap of jobs on the same node (Q2)\n\n"
     s += ("Definition: per node, jobs sorted by (start, end, job_id); a job overlaps if its "
           "start is strictly before the latest end among earlier jobs on that node. "
-          "Overlap seconds = min(prev_end, end) − start.\n\n")
+          "Overlap seconds = min(prev_end, end) − start.\n\n"
+          "Decision D14: overlaps ≤ 60 s are treated as non-overlapping; per-node job order "
+          "for Layer 2 is `end_time`, ties broken by `row_id`.\n\n")
     s += _kv(p["overlaps"])
     s += "\nLargest overlaps:\n\n" + _table(p["overlap_examples"])
     s += "\n## Job-name-like field\n\n"
     s += (f"Raw columns containing 'name': {p['name_like_columns'] or 'none'}. "
-          "No job-name field exists, so contract `name` is null. For baseline B1 "
-          "(PLAN.md §9 Phase 4.4) the fallback is distinct partitions/qos — decision for "
-          "Mahesh (not taken in Phase 0).\n")
+          "No job-name field exists, so contract `name` is null. Decision D13: baseline B1 on "
+          "PM100 = median relative residual > 20%, ≥ 10 jobs, ≥ 3 distinct users, persistent "
+          "for 3 consecutive windows; the \"≥ 3 applications\" condition is dropped "
+          "(limitation, PLAN.md §12).\n")
     return s
 
 
@@ -455,7 +469,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     args = ap.parse_args()
-    run = start_run("phase0", args.config, tag="profile")
+    return run_guarded(start_run("phase0", args.config, tag="profile"), _profile)
+
+
+def _profile(run: Run) -> int:
     cfg, log = run.config, run.log
 
     raw_dir, sums_file = resolve(cfg["raw_dir"]), resolve(cfg["checksums_file"])

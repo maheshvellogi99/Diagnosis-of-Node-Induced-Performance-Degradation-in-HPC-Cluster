@@ -11,6 +11,7 @@ import random
 import shlex
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -115,3 +116,13 @@ def start_run(phase: str, config_path: str | Path, tag: str = "") -> Run:
              run_id, config_path, config_hash, commit)
     return Run(run_id, phase, run_dir, config, config_hash, commit,
                now.isoformat(timespec="seconds"), log)
+
+
+def run_guarded(run: Run, body: Callable[[Run], int]) -> int:
+    """Call body(run); if it raises, register the run as failed in the registry, then re-raise."""
+    try:
+        return body(run)
+    except BaseException as exc:
+        run.log.exception("run %s crashed", run.run_id)
+        run.finish(f"failed: {type(exc).__name__}: {exc}"[:300])
+        raise

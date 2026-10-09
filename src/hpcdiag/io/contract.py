@@ -1,7 +1,8 @@
-"""Data contracts from PLAN.md §3.1 (with D8/D9: lossless loaders, state_raw kept)."""
+"""Data contracts from PLAN.md §3.1 (D8 lossless, D9 state_raw, D10 row_id key)."""
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 
@@ -9,7 +10,8 @@ TS = pa.timestamp("us")  # UTC-naive (CLAUDE.md conventions)
 
 JOBS_SCHEMA = pa.schema(
     [
-        ("job_id", pa.int64()),
+        ("row_id", pa.int64()),  # position in the raw file; unique key (D10)
+        ("job_id", pa.int64()),  # as given; not unique in Eagle
         ("system", pa.string()),
         ("user", pa.string()),
         ("partition", pa.string()),
@@ -33,6 +35,7 @@ JOBS_SCHEMA = pa.schema(
 
 JOB_NODES_SCHEMA = pa.schema(
     [
+        ("row_id", pa.int64()),
         ("job_id", pa.int64()),
         ("node_id", pa.int64()),
         ("n_nodes", pa.int64()),
@@ -42,7 +45,7 @@ JOB_NODES_SCHEMA = pa.schema(
 )
 
 # Columns that must never be null (everything else may be null; D8).
-JOBS_NOT_NULL = ["job_id", "system", "user", "partition", "qos", "submit_time",
+JOBS_NOT_NULL = ["row_id", "job_id", "system", "user", "partition", "qos", "submit_time",
                  "nodes_req", "procs_req", "gpus_req", "state", "state_raw",
                  "censored"]
 
@@ -61,6 +64,18 @@ def to_utc_naive(s: pd.Series) -> pd.Series:
     return s.astype("datetime64[us]")
 
 
+def raw_row_ids(raw: pd.DataFrame) -> np.ndarray:
+    """0-based position of each row in the raw file (D10).
+
+    `raw` must be the whole raw file in file order (as returned by read_raw), so that its
+    index is a RangeIndex 0..n-1; anything else raises.
+    """
+    idx = raw.index
+    if not (isinstance(idx, pd.RangeIndex) and idx.start == 0 and idx.step == 1):
+        raise ValueError("raw frame must keep its original RangeIndex (whole file, file order)")
+    return np.arange(len(raw), dtype="int64")
+
+
 def to_table(df: pd.DataFrame, schema: pa.Schema) -> pa.Table:
     """Select contract columns in order and cast to the contract schema (raises on mismatch)."""
     return pa.Table.from_pandas(df[schema.names], schema=schema, preserve_index=False)
@@ -74,6 +89,8 @@ def validate_jobs(df: pd.DataFrame) -> None:
     nulls = {c: int(df[c].isna().sum()) for c in JOBS_NOT_NULL if df[c].isna().any()}
     if nulls:
         raise ValueError(f"nulls in not-null columns: {nulls}")
+    if not df["row_id"].is_unique:
+        raise ValueError("row_id is not unique")
     neg = int((df["run_time_s"] < 0).sum())
     if neg:
         raise ValueError(f"{neg} negative run_time_s values")

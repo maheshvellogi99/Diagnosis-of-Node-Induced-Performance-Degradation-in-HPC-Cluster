@@ -5,6 +5,7 @@ PLAN.md §3.1, F8.
 Units: run_time is seconds; time_limit is minutes, 'INFINITE' -> null (F8).
 Timestamps are tz-aware UTC in the raw file; they are converted to UTC-naive.
 PM100 has no account and no job-name field (Phase 0 finding), so both are null.
+mem_req: units unknown, kept as-is (D12). row_id = position in the raw file (D10).
 Lossless (D8): every raw row is kept.
 """
 
@@ -19,6 +20,7 @@ from hpcdiag.io.contract import (
     JOB_NODES_SCHEMA,
     JOBS_SCHEMA,
     normalise_state,
+    raw_row_ids,
     to_utc_naive,
     validate_jobs,
 )
@@ -62,9 +64,10 @@ def parse_nodes(nodes: pd.Series) -> pd.Series:
 
 
 def to_contract(raw: pd.DataFrame) -> pd.DataFrame:
-    """Map raw PM100 columns onto the jobs contract."""
+    """Map raw PM100 columns onto the jobs contract. `raw` = whole file in file order."""
     out = pd.DataFrame(
         {
+            "row_id": raw_row_ids(raw),
             "job_id": raw["job_id"].astype("int64"),
             "system": "pm100",
             "user": raw["user_id"].astype("int64").astype("str"),
@@ -92,7 +95,7 @@ def to_contract(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def job_nodes(raw: pd.DataFrame) -> pd.DataFrame:
-    """One row per (job, allocated node): job_id, node_id, n_nodes, start_time, end_time."""
+    """One row per (job, allocated node): row_id, job_id, node_id, n_nodes, start, end."""
     nodes = parse_nodes(raw["nodes"])
     n = nodes.map(len).astype("int64")
     if (n == 0).any():
@@ -100,6 +103,7 @@ def job_nodes(raw: pd.DataFrame) -> pd.DataFrame:
     rep = np.repeat(np.arange(len(raw)), n.to_numpy())
     out = pd.DataFrame(
         {
+            "row_id": raw_row_ids(raw)[rep],
             "job_id": raw["job_id"].to_numpy()[rep].astype("int64"),
             "node_id": np.fromiter((x for lst in nodes for x in lst), dtype="int64",
                                    count=int(n.sum())),

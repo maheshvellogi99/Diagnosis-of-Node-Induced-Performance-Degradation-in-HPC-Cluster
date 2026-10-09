@@ -75,7 +75,7 @@ on every node.
 | F4 | Eagle `run_time` is seconds (= end − start for 99.97% of completed jobs). `wallclock_req` is consistent with seconds (run_time > wallclock_req for only 0.016% of completed jobs). 107 rows have no wallclock_req. | same |
 | F5 | Eagle COMPLETED+TIMEOUT: 8,193,588 jobs, ≈5,252/day; median run_time 992 s (≈16.5 min, matching the paper's "approximately 16 minutes"); 91.3% of completed jobs request 1 node; 10.1% run < 30 s | same |
 | F6 | Menear et al. (PEARC'23) protocol: drop cancelled and failed jobs, keep timeouts; train on jobs **ending** before split, test on jobs **submitted** on the split day; training window 100 days; test window 1 day (retrain daily); label encoding; best categorical set = user + partition; best numerical sets include processors and memory (wallclock always included); XGBoost 1.7.1 `XGBRegressor` defaults; 244 split times every 6 days; RMSE 8.14 h for their per-split feature selection (8.45 h for previous-split selection) | Mastering HPC Runtime Prediction §3.2–3.6, App. A–B |
-| F7 | PM100 (Marconi100): 231,116 jobs, May–Oct 2020, only jobs that ran exclusively on their nodes; one 287 MB parquet; Zenodo record 10127767 | Zenodo page |
+| F7 | PM100 (Marconi100): Zenodo description says 231,116 jobs; the md5-verified file has 231,238 rows, May 5 – Oct 13 2020 (162 days). **We use the file** (D11). Only jobs that ran exclusively on their nodes (Zenodo); one 287 MB parquet; Zenodo record 10127767 | Zenodo page; file computed in Phase 0 (`reports/phase_0.md`) |
 | F8 | PM100 fields include `nodes` ("List of nodes allocated to job"), `num_nodes_alloc`, `user_id`, `partition`, `qos`, `submit_time`, `start_time`, `end_time`, `run_time` (seconds), `time_limit` (minutes or INFINITE), `job_state`, `num_cores_req/alloc`, `num_gpus_req/alloc`, `mem_req/alloc` | PM100 repo `documentation/job_features.md` |
 | F9 | M100 node identifiers, user ids, job ids are anonymised to random integers; Nagios-flagged nodes are put **offline** and cannot run jobs until fixed | M100 ExaData paper |
 | F10 | UARP: LightGBM quantile models τ ∈ {0.50, 0.99}; residual model σ(x)=sqrt(E[(y−Q0.50)²|x]); margin = max(0.2·Q0.99, 0.5·σ); 200 iterations, learning rate 0.05, 50 leaves; 70/30 temporal split; 6 features; MinMax scaling | UARP §4, §5 |
@@ -103,6 +103,7 @@ on every node.
 | Q6 | Does the node e-process stay ≤ 1/α on clean data (no false flags), despite system-wide slowdowns? | Phase 4 |
 | Q7 | How many jobs (days) does it take to flag a node slowed by 10/20/30%? | Phase 4 |
 | Q8 | Institute cluster: size, scheduler, permission for fault injection | before Phase 6 |
+| Q9 | PM100 training-window / warm-up length (PM100 spans only 162 days, so Eagle's 100-day windows do not transfer; D15) | Phase 2 |
 
 ---
 
@@ -140,7 +141,8 @@ All tables are parquet in `data/processed/`. Column names are fixed here; Phase 
 **`jobs_<system>.parquet`** (one row per job, both systems)
 | column | type | notes |
 |---|---|---|
-| job_id | int64 | unique within system |
+| row_id | int64 | position in the raw file (0-based); **unique key within system** (D10). Downstream tables are keyed by (system, row_id) |
+| job_id | int64 | as given in the source; **not unique in Eagle** (Phase 0: 6,751 ids repeat), unique in PM100 |
 | system | str | `eagle` or `pm100` |
 | user | str | anonymised id |
 | partition, qos | str | |
@@ -150,16 +152,16 @@ All tables are parquet in `data/processed/`. Column names are fixed here; Phase 
 | run_time_s | float64 | seconds, ≥ 0 or null (loaders are lossless, D8; `> 0` and other filters are applied per phase) |
 | walltime_req_s | float64 | requested limit in seconds (PM100: time_limit × 60; INFINITE → null) |
 | nodes_req, procs_req, gpus_req | int64 | |
-| mem_req | float64 | units as in source; recorded in data card |
+| mem_req | float64 | units UNKNOWN for both systems; used as-is, never converted; only used by tree models (scale-invariant) (D12) |
 | state | str | normalised: COMPLETED, TIMEOUT, other |
 | state_raw | str | state exactly as in the source file (D9) |
 | censored | bool | TRUE if state == TIMEOUT (true runtime ≥ observed) |
 
 **`job_nodes_pm100.parquet`** (one row per job × node; PM100 only)
-| job_id | node_id (int64) | n_nodes (int64) | start_time | end_time |
+| row_id | job_id | node_id (int64) | n_nodes (int64) | start_time | end_time |
 
 **`layer1_scores_<system>_<run_id>.parquet`**
-| job_id | end_time | group_key | q_hat | score | p_value | theta | alarm_fixed | alarm_aci | model_version |
+| system | row_id | job_id | end_time | group_key | q_hat | score | p_value | theta | alarm_fixed | alarm_aci | model_version |
 
 **`layer2_state_<run_id>.parquet`** (one row per node per evaluation time)
 | eval_time | node_id | log_M | n_jobs | n_users | flagged_ebh | flagged_<baseline> |
@@ -317,7 +319,11 @@ Q1–Q3 answered in `reports/phase_0.md`.
   categorical = user, partition (label-encoded; codes fitted on the training window; unseen → −1).
 - Splits: split times every 6 days across the data (first split ≥ 100 days after start);
   train = jobs with `end_time` in [t − 100 d, t); test = jobs with `submit_time` in [t, t + 1 d).
-- Model: `xgboost.XGBRegressor()` defaults (record the version; the paper used 1.7.1).
+- Model: `xgboost.XGBRegressor()` defaults (record the version; the paper used 1.7.1). Save the full
+  XGBoost configuration actually used (`model.get_booster().save_config()`) in the run folder.
+- Duplicate rows (D10): the main run keeps all rows, including Eagle rows on repeated `job_id`.
+  A sensitivity variant drops exact duplicate rows (identical in all raw columns) before the
+  filters; both are reported.
 - Also run: the "similar jobs" and "recent jobs" heuristics only if time permits (optional).
 
 **Outputs.** Per-split metrics (RMSE h, MAE h, TARE A_geo, UnderRate), error by actual-runtime
@@ -325,7 +331,9 @@ bins (0–1 h, 1–6 h, 6–24 h, 1–2 d, > 2 d), plot of predicted vs actual b
 
 **Gate 1.** Overall RMSE over all splits is within ±20% of 8.14 h (i.e. 6.5–9.8 h) **and** the
 qualitative pattern holds: underestimation grows for jobs > 2 days [V: Menear §3.6]. If outside the
-range: report it, check filters/units, do not tune on test splits.
+range: report it, check filters/units, do not tune on test splits. If Gate 1 fails, the first
+sensitivity check is a rerun with `tree_method="approx"` (xgboost 3.2.0 vs the paper's 1.7.1 may
+differ in the default tree method), before changing anything else.
 
 ---
 
@@ -378,6 +386,11 @@ default to Mode A only with written reasons (Decision Log).
 **Note.** Eagle has no node list, so Layer 1 is first built and validated on Eagle,
 then re-run unchanged on PM100 to feed Layer 2 (Gate 2 is checked on both).
 
+**2.7 PM100 windows (D15, closes Q9).** PM100 spans only 162 days, so Eagle's 100-day windows do
+not transfer. The PM100 training prefix / warm-up is chosen by comparing training prefixes of
+30, 45 and 60 days, evaluated on the **first 90 days only**; the rest of PM100 is not looked at
+for this choice. The chosen value is recorded in the Decision Log.
+
 ---
 
 ### Phase 3 — Ground truth: semi-synthetic injection on PM100
@@ -395,6 +408,7 @@ then re-run unchanged on PM100 to feed Layer 2 (Gate 2 is checked on both).
   behaviour: no node is flagged.
 - **Censoring.** If T' exceeds the job's time limit, set T' = limit and `censored = TRUE`.
 - Each scenario has ≥ 20 random seeds.
+- Onsets t₀ (and shock windows t₁) must fall after the PM100 warm-up chosen in Phase 2 (D15).
 
 **Gate 3.** Unit tests show: unaffected jobs are byte-identical; affected jobs follow the formula;
 truth tables match the injected set exactly.
@@ -420,6 +434,9 @@ n ∈ N_j:
   are sequentially valid, E[f(p_j) | past] ≤ 1. This holds if p-values are uniform given the past
   (Mode E) and node placement does not depend on lateness.
 - Work in log space: log M (avoid overflow).
+- Per-node job order (D14): jobs are applied to M_n in `end_time` order, ties broken by `row_id`.
+  Same-node overlaps ≤ 60 s (Phase 0: max 19 s) are treated as non-overlapping. The PM100
+  `shared` column has unknown semantics and is not used.
 
 **4.2 System-shock guard [D].** A filesystem slowdown makes all jobs late at once, which would raise
 every node's M together. Two options, both implemented and compared:
@@ -433,8 +450,9 @@ After a node is flagged and handed to Layer 3, its M is reset to 1 once it is cl
 
 **4.4 Baselines.**
 - B1 guide heuristic: median relative residual > 20%, ≥ 10 jobs, ≥ 3 users, ≥ 3 distinct job
-  names (if PM100 lacks names: ≥ 3 distinct partitions/qos — decided in Phase 0), persistent for 3
-  consecutive windows [V: hpc_project.pdf §10.5].
+  names, persistent for 3 consecutive windows [V: hpc_project.pdf §10.5]. **On PM100** (no job
+  name, D13): median relative residual > 20%, ≥ 10 jobs, ≥ 3 distinct users, persistent for 3
+  consecutive windows; the "≥ 3 applications" condition is dropped (limitation, §12).
 - B2 top-5%: flag the top 5% of nodes by mean residual each window.
 - B3 BH on per-node Fisher-combined p-values (assumes independence).
 - B4 averaged e-values (our earlier design; expected to be nearly powerless — included to show why).
@@ -528,6 +546,8 @@ end, status, key metrics. Reports cite run ids.
 | Node placement correlated with lateness (e.g. certain users on certain racks) | Mondrian by user; check per-node p-value uniformity on clean data (Gate 4a) |
 | Injection model too simple (straggler assumption) | "partial" variant; Phase 6 real injections |
 | PM100 contains only exclusive jobs | state as limitation; shared-node jobs future work |
+| PM100 has no job name, so baseline B1 drops the "≥ 3 applications" condition (D13) | state as limitation; B1 on PM100 is weaker than the guide's rule as written |
+| Eagle `job_id` repeats (rows on 6,751 ids) | `row_id` key (D10); Phase 1 sensitivity run without exact duplicate rows |
 | Nagios labels mark offline nodes, not slow nodes | used only as exploratory precursor analysis |
 | e-BH conservative (F18) | report power honestly; compare with BH (B3) |
 | Small cluster for Phase 6 | primary results from PM100 semi-synthetic; Phase 6 as demonstration |
@@ -593,3 +613,9 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D7 | 9 Oct 2026 | Mondrian group = user, fallback partition → global, n_min = 30 | User is the most predictive feature (F6); groups need enough history |
 | D8 | 9 Oct 2026 | Loaders are lossless; filtering happens per phase | Every raw row is kept in `data/processed/` (null/0 allowed, negatives rejected); each phase applies and documents its own filters |
 | D9 | 9 Oct 2026 | `state_raw` kept alongside `state` | Normalised `state` (COMPLETED/TIMEOUT/other) loses the original state; data cards and later filters need it |
+| D10 | 9 Oct 2026 | Contract column `row_id` (int64, position in raw file) is the unique key for both systems; `job_id` kept as given; Layer-1/Layer-2 tables keyed by (system, row_id). Phase 1 main run keeps duplicate rows; a sensitivity variant drops exact duplicate rows; both reported | Eagle `job_id` repeats: 6,751 ids on 371,160 rows, 105,510 exact copies (Phase 0) |
+| D11 | 9 Oct 2026 | F7 corrected: Zenodo description says 231,116 jobs; the md5-verified file has 231,238 rows, May 5 – Oct 13 2020 (162 days). We use the file | Phase 0 row count; file MD5 equals the published one |
+| D12 | 9 Oct 2026 | `mem_req` units unknown for both systems: values used as-is, never converted; only used by tree models (scale-invariant) | Units not stated in sources we hold (Phase 0) |
+| D13 | 9 Oct 2026 | Baseline B1 on PM100 = median relative residual > 20%, ≥ 10 jobs, ≥ 3 distinct users, persistent for 3 consecutive windows; "≥ 3 applications" dropped and recorded as a limitation (§12) | PM100 has no job-name field; partition/qos fallback has too few values (Phase 0) |
+| D14 | 9 Oct 2026 | PM100 same-node overlaps ≤ 60 s treated as non-overlapping; per-node job order = `end_time`, ties broken by `row_id`; `shared` column semantics UNKNOWN, not used | Phase 0: 2,763 overlaps, max 19 s, none > 60 s |
+| D15 | 9 Oct 2026 | PM100 windows chosen in Phase 2 by comparing training prefixes of 30/45/60 days on the first 90 days only; Phase 3 onsets after the chosen warm-up (open question Q9) | PM100 spans only 162 days; Eagle's 100-day windows do not transfer |

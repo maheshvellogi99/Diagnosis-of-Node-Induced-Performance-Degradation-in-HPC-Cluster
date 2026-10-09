@@ -13,14 +13,17 @@ import pyarrow.parquet as pq
 from hpcdiag.io import eagle, pm100
 from hpcdiag.io.contract import JOB_NODES_SCHEMA, JOBS_SCHEMA, to_table
 from hpcdiag.utils.checksums import verify
-from hpcdiag.utils.run import resolve, start_run
+from hpcdiag.utils.run import Run, resolve, run_guarded, start_run
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     args = ap.parse_args()
-    run = start_run("phase0", args.config, tag="build")
+    return run_guarded(start_run("phase0", args.config, tag="build"), _build)
+
+
+def _build(run: Run) -> int:
     cfg, log = run.config, run.log
 
     problems = verify(resolve(cfg["raw_dir"]), resolve(cfg["checksums_file"]))

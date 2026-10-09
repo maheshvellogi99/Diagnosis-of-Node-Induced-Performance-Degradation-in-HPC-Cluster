@@ -89,6 +89,28 @@ def test_eagle_contract_columns_dtypes_and_values():
     assert out["walltime_req_s"].iloc[0] == 3600.0  # seconds, no conversion (F4)
     assert np.isnan(out["walltime_req_s"].iloc[2])
     assert (out["system"] == "eagle").all()
+    assert out["row_id"].tolist() == [0, 1, 2, 3]  # position in raw file (D10)
+
+
+def test_row_id_is_position_even_when_job_id_repeats():
+    raw = _eagle_raw()
+    raw["job_id"] = [5, 5, 5, 6]  # Eagle-style repeated job_id
+    out = eagle.to_contract(raw)
+    assert out["row_id"].tolist() == [0, 1, 2, 3]
+    assert out["row_id"].is_unique and not out["job_id"].is_unique
+
+
+def test_row_id_requires_whole_raw_file_in_order():
+    raw = _eagle_raw().iloc[[1, 2]]  # subset keeps index 1, 2 -> positions would be wrong
+    with pytest.raises(ValueError, match="RangeIndex"):
+        eagle.to_contract(raw)
+
+
+def test_validate_jobs_rejects_duplicate_row_id():
+    out = eagle.to_contract(_eagle_raw())
+    out.loc[1, "row_id"] = 0
+    with pytest.raises(ValueError, match="row_id"):
+        validate_jobs(out)
 
 
 def test_pm100_contract_time_limit_tz_and_user():
@@ -136,6 +158,7 @@ def test_job_nodes_rowcount_equals_sum_of_nodes():
     assert to_table(jn, JOB_NODES_SCHEMA).schema.equals(JOB_NODES_SCHEMA)
     assert len(jn) == sum(len(x) for x in raw["nodes"]) == 6
     assert jn[jn.job_id == 11]["node_id"].tolist() == [1, 2, 3]
+    assert jn[jn.job_id == 11]["row_id"].tolist() == [1, 1, 1]
     assert (jn.groupby("job_id")["n_nodes"].first() == jn.groupby("job_id").size()).all()
 
 
@@ -222,12 +245,21 @@ def test_pm100_job_id_unique():
 
 
 @realdata
-@pytest.mark.xfail(strict=True, reason="Eagle job_id repeats in the raw file (Phase 0 finding); "
-                   "contract says unique — awaiting decision, see reports/phase_0.md")
-def test_eagle_job_id_unique():
+@pytest.mark.parametrize("system", ["eagle", "pm100"])
+def test_row_id_unique_key(system):
+    """D10: row_id is the unique key and equals the 0-based position in the raw file."""
+    _need(PROCESSED[system])
+    rid = pq.read_table(PROCESSED[system], columns=["row_id"])["row_id"].to_numpy()
+    np.testing.assert_array_equal(rid, np.arange(len(rid), dtype="int64"))
+
+
+@realdata
+def test_eagle_row_id_matches_raw_job_id_order():
+    """row_id i must point at raw row i: job_id sequences agree position by position."""
     _need(PROCESSED["eagle"])
-    ids = pq.read_table(PROCESSED["eagle"], columns=["job_id"])["job_id"]
-    assert len(ids) == len(ids.unique())
+    proc = pq.read_table(PROCESSED["eagle"], columns=["row_id", "job_id"]).to_pandas()
+    raw = pq.read_table(resolve("data/raw/eagle/eagle_data.parquet"), columns=["job_id"])
+    np.testing.assert_array_equal(proc["job_id"].to_numpy(), raw["job_id"].to_numpy())
 
 
 @realdata
@@ -252,3 +284,8 @@ def test_job_nodes_schema_and_rowcount():
     assert (per_job["first"] == per_job["size"]).all()
     assert len(jn) == int(per_job["first"].sum())
     assert set(per_job.index) == set(raw["job_id"].to_pylist())
+    keys = pq.read_table(JOB_NODES, columns=["row_id", "job_id"]).to_pandas().drop_duplicates()
+    jobs = pq.read_table(PROCESSED["pm100"], columns=["row_id", "job_id"]).to_pandas()
+    merged = keys.merge(jobs, on="row_id", suffixes=("_jn", "_jobs"), validate="one_to_one")
+    assert len(merged) == len(jobs)
+    assert (merged["job_id_jn"] == merged["job_id_jobs"]).all()
