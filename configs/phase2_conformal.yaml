@@ -77,3 +77,28 @@ systems:
       tie_rel: 0.01
     mode_a_first_day: 90          # Mode A daily from start + 90 d
     split_every_days: 1
+
+# ---- PROMPT 2B (D22-D26) ----
+mode_p:                           # D22: pooled sliding-window conformal on Mode E scores
+  windows_hours: {"6h": 6, "1d": 24, "7d": 168, "365d": 8760}
+  main_window: "7d"
+  min_ref: 30                     # |R_j| < 30 -> NaN (warm-up)
+  variants: [global, qhat_decile, user_first]   # user_first = exploratory (definition ours)
+  theta_noise_seeds: [101, 102, 103, 104, 105]  # Monte-Carlo noise from theta (main window)
+
+tail:                             # D24
+  thresholds: [0.001, 0.0001]
+  kappas: [0.05, 0.1, 0.25, 0.5]
+  null_sims: 300
+  null_seed: 2024
+
+gate2_l2:                         # D26 (Gate 2-L2, input to Layer 2)
+  ks_max: 0.02
+  fa_tol: 0.01
+  p_le_1e3_max: 0.002
+  aci_tol: 0.005                  # global-stream ACI, gamma = aci_gamma_default
+
+node_check:                       # Step 9, exploratory only
+  min_jobs: 50
+  alpha: 0.05
+  job_nodes: data/processed/job_nodes_pm100.parquet
