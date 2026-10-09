@@ -107,6 +107,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "scikit-learn" },
     { name = "scipy" },
+    { name = "sortedcontainers" },
     { name = "tqdm" },
     { name = "xgboost" },
 ]
@@ -129,6 +130,7 @@ requires-dist = [
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "scikit-learn", specifier = "==1.9.1" },
     { name = "scipy", specifier = "==1.17.1" },
+    { name = "sortedcontainers", specifier = "==2.4.0" },
     { name = "tqdm", specifier = "==4.70.1" },
     { name = "xgboost", specifier = "==3.2.0" },
 ]

@@ -344,21 +344,35 @@ alarm whose long-run false-alarm rate is α.
 
 **2.1 Quantile model [D].** LightGBM with `objective="quantile"`, `alpha=0.9`, on y = log(max(run_time,1)).
 Same features and split protocol as Phase 1. Also fit τ = 0.5 (median) for reporting.
-(UARP settings as a reference: 200 iterations, lr 0.05, 50 leaves [V: F10].)
+Hyperparameters (D20): UARP settings — 200 iterations, learning rate 0.05, 50 leaves [V: F10].
+Scoring population (D17): jobs with run_time_s > 30 (TARE convention) for the main results; all
+jobs as a reported variant. The population filter applies to training, calibration and test rows.
 
 **2.2 Nonconformity score (one-sided CQR, F11).** S_j = log T_j − q̂_0.9(x_j). Large S = late.
 TIMEOUT jobs are right-censored: their S is a lower bound, which can only make their p-value larger
 (conservative) [A — check the fraction of TIMEOUT jobs among alarms].
 
 **2.3 Two p-value modes (both implemented, compared) [D].**
-- **Mode E (exact).** Train the quantile model **once** on a 100-day prefix, then freeze it.
+- **Mode E (exact).** Train the quantile model **once** on a 100-day prefix (PM100: the chosen
+  prefix L, 2.7), then freeze it. Jobs are processed in (end_time, row_id) order (D14 convention;
+  jobs with equal end_time are ordered by row_id).
   For each group g (user), process that user's later jobs in end-time order and compute the
   smoothed online conformal p-value (F12):
   p_n = ( |{i ≤ n : S_i > S_n}| + θ_n · |{i ≤ n : S_i = S_n}| ) / n,  i over the group's jobs so far including n.
   Under exchangeability within the group these are IID uniform [V: F12] — this is what Layer 2's
   product needs.
-- **Mode A (adaptive).** Retrain daily (Phase 1 protocol). Calibrate on the group's jobs that ended
-  in the last W_cal = 14 days (not used for training that day's model, **D**), re-scored with the current model:
+  Mode E grouping (D19): every job updates three streams (its user, its partition, global). Default
+  = fallback: the reported p-value comes from the user stream if the user has ≥ n_min = 30 earlier
+  post-freeze jobs, else the partition stream if it has ≥ 30, else the global stream. Each stream
+  alone is exactly valid (F12); the sequential independence of the reported p-values across a
+  switch between streams is an assumption **[A — tested in Gate 4a]**. Variant = pure per-user
+  streams (no fallback), exactly IID under within-user exchangeability.
+- **Mode A (adaptive).** Retrain at each split time t (Eagle: the 244 Phase 1 split times, evaluated
+  on the same non-empty test days; PM100: daily). Exact windows (addendum B, 9 Oct 2026):
+  **train on end_time ∈ [t − 114 d, t − 14 d), calibrate on end_time ∈ [t − 14 d, t), test on
+  submit_time ∈ [t, t + 1 d)** (PM100: train on [t − L − 14 d, t − 14 d), L from 2.7). Training and
+  calibration rows are disjoint; every calibration job ends before every test job is submitted.
+  Calibration uses the group's jobs in the calibration window, re-scored with the current model:
   p_j = (1 + |{i ∈ C_g : S_i ≥ S_j}|) / (|C_g| + 1). Valid marginally under exchangeability with C_g;
   dependence across jobs is not exact [A].
 - Group fallback [D]: if a user has fewer than n_min = 30 calibration jobs, use partition; then global.
@@ -377,9 +391,15 @@ err_t = alarm indicator; γ = 0.005 [V: Gibbs & Candès' choice] plus a sensitiv
 false-alarm rate vs α (overall, per runtime bin, per top-decile resource use);
 p-value histogram + KS distance to uniform (overall and per group);
 coverage and width of the upper bound; TARE A_geo and UnderRate for the τ=0.5 model.
+"Top-decile resource use" key = nodes_req × walltime_req_s (known at submission); this differs
+from TARE's weight c_i = nodes_req × actual run time. Also: share of alarms that are TIMEOUT
+(censored) jobs, and false-alarm rates in the 1–2 d and > 2 d bins reported separately.
+Mode E is reported on (i) all post-freeze jobs and (ii) the Mode A test days.
 
-**Gate 2.** Mode E: KS distance of pooled p-values to uniform ≤ 0.02, and empirical
-false-alarm rate within α ± 0.01 at α ∈ {0.01, 0.05, 0.10}. ACI: long-run alarm rate within
+**Gate 2.** Checked separately on Eagle and PM100, main population (D17). Mode E (fallback
+grouping, D19) on all post-freeze jobs: KS distance of pooled p-values to uniform ≤ 0.02, and
+empirical false-alarm rate within α ± 0.01 at α ∈ {0.01, 0.05, 0.10}. ACI on Mode A p-values,
+γ = 0.005, per user in end-time order over the test-day jobs: long-run alarm rate within
 α ± 0.005 over the test period. If Mode E fails, report per-group drift and switch the
 default to Mode A only with written reasons (Decision Log).
 
@@ -390,6 +410,11 @@ then re-run unchanged on PM100 to feed Layer 2 (Gate 2 is checked on both).
 not transfer. The PM100 training prefix / warm-up is chosen by comparing training prefixes of
 30, 45 and 60 days, evaluated on the **first 90 days only**; the rest of PM100 is not looked at
 for this choice. The chosen value is recorded in the Decision Log.
+Rule (D18): all three L share the same test days, days 74–89 after the earliest submit time
+(test windows [start + 74 d + k, start + 75 d + k), k = 0..15); each L uses the Mode A protocol
+retrained daily (train on [t − L − 14 d, t − 14 d)); choose the L with the lowest pooled pinball
+loss at τ = 0.9 on log runtime; if the pinball losses are within 1% of each other, choose the
+shorter window. The rule never looks at p-values or at anything after day 90.
 
 ---
 
@@ -619,3 +644,8 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D13 | 9 Oct 2026 | Baseline B1 on PM100 = median relative residual > 20%, ≥ 10 jobs, ≥ 3 distinct users, persistent for 3 consecutive windows; "≥ 3 applications" dropped and recorded as a limitation (§12) | PM100 has no job-name field; partition/qos fallback has too few values (Phase 0) |
 | D14 | 9 Oct 2026 | PM100 same-node overlaps ≤ 60 s treated as non-overlapping; per-node job order = `end_time`, ties broken by `row_id`; `shared` column semantics UNKNOWN, not used | Phase 0: 2,763 overlaps, max 19 s, none > 60 s |
 | D15 | 9 Oct 2026 | PM100 windows chosen in Phase 2 by comparing training prefixes of 30/45/60 days on the first 90 days only; Phase 3 onsets after the chosen warm-up (open question Q9) | PM100 spans only 162 days; Eagle's 100-day windows do not transfer |
+| D16 | 9 Oct 2026 | Not used — the Phase 1 pre-registered fallback ("harness validated, exact reproduction not achieved") was not triggered: Gate 1 passed (pooled RMSE 7.380 h) | `reports/phase_1.md` |
+| D17 | 9 Oct 2026 | Layer-1 conformal scoring population = jobs with run_time_s > 30 (TARE convention) for main results; all jobs reported as a variant; the filter applies to training, calibration and test rows | TARE convention: keep runtime > 30 s (F20); addendum A to PROMPT 2 |
+| D18 | 9 Oct 2026 | PM100 window selection rule (Phase 2.7): shared test days 74–89, Mode A daily, lowest pooled pinball loss at τ = 0.9 on log runtime, ties within 1% → shorter window; never looks at p-values or anything after day 90 | PM100 spans 162 days (D15); rule fixed before running |
+| D19 | 9 Oct 2026 | Mode E grouping: fallback user → partition → global (n_min = 30) as default; pure per-user streams as a variant; fallback cross-switch independence is [A], tested in Gate 4a | Power for new users vs exact IID validity |
+| D20 | 9 Oct 2026 | Quantile models use UARP settings (200 iterations, lr 0.05, 50 leaves); B-UARP on every split | Cited settings (F10); approved compute (~80 min Eagle) |
