@@ -1,0 +1,57 @@
+# Phase 1 — Layer 1 baseline: reproduce Menear et al. (PEARC'23) on Eagle.
+# Sources: PLAN.md §9 Phase 1, §10, F6, F20; Phase 1 prompt addendum A–E (9 Oct 2026); D5, D10.
+seed: 0
+
+data:
+  jobs: data/processed/jobs_eagle.parquet          # Phase 0 contract table (lossless, D8)
+  raw: data/raw/eagle/eagle_data.parquet           # only for exact-duplicate detection (v2_nodup)
+  exact_dup_row_ids: data/interim/eagle_exact_dup_row_ids.parquet
+  expected_exact_dups: 105510                      # Phase 0 count (reports/phase_0.md §5.4)
+  raw_dir: data/raw
+  checksums_file: data/raw/CHECKSUMS.txt
+
+# Row filters. Main run = addendum A; variants add to it.
+filters:
+  states: [COMPLETED, TIMEOUT]                     # D5 / F6 (state_raw)
+  require_walltime: true                           # drop rows with walltime_req_s null (PLAN Phase 1)
+
+variants:
+  main: {}                                         # no runtime filter (paper states none)
+  v1_rt30: {min_run_time_s_exclusive: 30}          # TARE convention (F20): run_time_s > 30
+  v2_nodup: {drop_exact_duplicates: true}          # D10: drop rows identical to an earlier raw row
+
+features:                                          # PLAN Phase 1 (D6), addendum B
+  numeric: [walltime_req_s, procs_req, mem_req, nodes_req, gpus_req]
+  categorical: [user, partition]                   # label-encoded on the training window; unseen -> -1
+  unseen_code: -1
+
+target: run_time_s                                 # seconds; RMSE reported in hours
+
+splits:                                            # F6, addendum C
+  first_split_offset_days: 100                     # first split = earliest submit_time + 100 d
+  split_every_days: 6
+  train_days: 100                                  # train: end_time in [t - 100 d, t)
+  test_days: 1                                     # test: submit_time in [t, t + 1 d)
+  # last split must satisfy t + test_days <= max submit_time of the filtered rows (approved)
+
+fast_mode:
+  n_splits: 12                                     # evenly spaced over the full split list
+
+model:
+  name: xgboost.XGBRegressor
+  params: {}                                       # defaults only (F6); version recorded per run
+  paper_version: "1.7.1"
+
+evaluation:
+  tare_min_run_time_s_exclusive: 30                # TARE metrics on run_time_s > 30 (F20, addendum D)
+  tare_clip_pred_min_s: 1.0                        # clip predictions to >= 1 s for TARE only
+  bins_hours: [0, 1, 6, 24, 48]                    # [0,1) [1,6) [6,24) [24,48) [48,inf)
+  bin_labels: ["0-1h", "1-6h", "6-24h", "1-2d", ">2d"]
+  qualitative_min_run_time_s_exclusive: 30         # r = log(max(yhat,1)/y) on y > 30 s (Gate 1 rule)
+
+gate1:
+  reference_rmse_h: 8.14                           # Menear per-split feature selection (F6)
+  band_rel: 0.20                                   # +-20% -> [6.512, 9.768] h
+  rmse_aggregation_for_gate: pooled                # addendum E; mean-of-splits reported alongside
+  qualitative: "median r in >2d bin < 0 and lowest of the five bins"
+  gate_variant: main
