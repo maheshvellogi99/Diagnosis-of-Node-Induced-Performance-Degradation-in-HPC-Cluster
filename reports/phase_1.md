@@ -232,3 +232,15 @@ predictions) are drawn at 1 s, which is the flat row at the bottom. Right: media
 - Training rows per split (main): min 84,542, median 536,528, max 992,860.
 - Test rows per split (main): min 2, median 4,016, max 38,614.
 - Nothing was tuned on test splits. Gate 1 uses only the main variant.
+
+## Addendum (9 Oct 2026, after Phase 1 acceptance — hand-written; sections above unchanged)
+
+**sens_approx diagnostic.** `uv run python scripts/diag_xgb_tree_method.py` (split index 90,
+2020-08-15 13:27:04; 656,543 training rows, 2,402 test rows; xgboost 3.2.0), fitted outside the
+runner: default (`auto`), `hist` and `approx` gave identical dumped trees and bitwise-identical
+predictions (max |difference| 0); `exact` differed (max 122,419 s), and `max_bin=64` differed
+from the default (max 307,497 s) but was identical between `hist` and `approx`. Parameters
+therefore reach the fitted model; the identity of `sens_approx` and main is xgboost 3.2.0
+behaviour on this data, not a runner bug. The cause was not investigated further. A guard test
+(`test_non_default_param_changes_predictions`) was added. The `sens_approx` result in §6
+stands; no rerun needed.

@@ -63,6 +63,18 @@ def test_config_fingerprint_ignores_only_base_score():
     assert config_fingerprint(a) != config_fingerprint(c)
 
 
+def test_non_default_param_changes_predictions():
+    """Guard: params given to run_split reach the fitted model (Phase 1 sens_approx check)."""
+    df = _df()
+    idx = TimeIndex.build(df["end_time"], df["submit_time"])
+    t = pd.Timestamp("2020-04-15")
+    a = run_split(df, idx, t, 100, 1, NUM, CAT, "run_time_s")
+    b = run_split(df, idx, t, 100, 1, NUM, CAT, "run_time_s", params={"max_depth": 2})
+    c = run_split(df, idx, t, 100, 1, NUM, CAT, "run_time_s", params={"tree_method": "exact"})
+    assert not np.array_equal(a.predictions["yhat"], b.predictions["yhat"])
+    assert not np.array_equal(a.predictions["yhat"], c.predictions["yhat"])
+
+
 def test_run_split_empty_returns_none():
     df = _df()
     idx = TimeIndex.build(df["end_time"], df["submit_time"])
