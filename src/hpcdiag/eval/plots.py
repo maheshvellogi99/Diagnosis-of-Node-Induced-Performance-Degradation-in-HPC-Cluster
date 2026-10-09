@@ -83,3 +83,25 @@ def pred_vs_actual_by_bin(y: np.ndarray, yhat: np.ndarray, table: pd.DataFrame,
     fig.savefig(out, dpi=150, facecolor=SURFACE)
     plt.close(fig)
     return out
+
+
+def rmse_over_time(split_t: pd.Series, rmse_h: pd.Series, band: tuple[float, float], ref: float,
+                   title: str, out: Path) -> Path:
+    """Per-split RMSE (hours) against split date, with the Gate 1 band shaded."""
+    fig, ax = plt.subplots(figsize=(11, 3.8))
+    fig.patch.set_facecolor(SURFACE)
+    ax.axhspan(band[0], band[1], color=GRID, alpha=0.45, lw=0)
+    ax.axhline(ref, color=INK_2, lw=1, ls="--")
+    ax.text(split_t.iloc[0], ref, f" reference {ref:g} h; shaded = Gate 1 band", color=INK_2,
+            fontsize=8, va="bottom")
+    ax.plot(split_t, rmse_h, color=SERIES_1, lw=1.5, marker="o", ms=3)
+    ax.set_ylabel("RMSE per split (h)")
+    ax.set_ylim(bottom=0)
+    ax.grid(axis="y", color=GRID, lw=0.6, alpha=0.6)
+    _style(ax)
+    fig.suptitle(title, color=INK, fontsize=11, x=0.01, ha="left")
+    fig.tight_layout()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=150, facecolor=SURFACE)
+    plt.close(fig)
+    return out

@@ -212,3 +212,13 @@ running at the same second range on one node (largest examples in the data card)
 - Raw files were not modified; `--verify` passes after all runs.
 
 Phase 0 complete. Stopped; Phase 1 not started.
+
+## Addendum (9 Oct 2026, after Phase 0 review — hand-written; the sections above are unchanged)
+
+Decision D10 resolved §7 item 1: the jobs contract gained `row_id` (int64, 0-based position in the
+raw file) as the unique key for both systems, with `job_id` kept as given; `job_nodes_pm100`
+carries `row_id` too. The strict-xfail test `test_eagle_job_id_unique` cited in §4 was therefore
+removed and replaced by `test_row_id_unique_key` (row_id equals 0..n−1 for Eagle and PM100) and
+`test_eagle_row_id_matches_raw_job_id_order`. Items 2–5 of §7 were resolved by D11–D15
+(PLAN.md §16, `docs/decisions.md`); the data cards were regenerated accordingly (profile run
+`20261009-215850-profile`).
