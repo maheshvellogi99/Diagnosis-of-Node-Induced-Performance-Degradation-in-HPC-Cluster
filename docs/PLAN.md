@@ -506,8 +506,8 @@ freeze Layer 2 updates. Default chosen by Gate 4a.
 **4.3 Selection (F17).** At each evaluation time (every 6 h, **D**): among m active nodes, base
 e-BH at level α = 0.1: flag the k* nodes with largest M, k* = max{k : k·M_[k]/m ≥ 1/α}.
 After a node is flagged and handed to Layer 3, its M is reset to 1 once it is cleared or repaired.
-m is FIXED at the number of nodes (PM100: 972 nodes with a post-freeze main-population job) at every
-evaluation; nodes with no scored job yet have M = 1 (D50 — a data-dependent m breaks the proof below).
+m is FIXED at the number of nodes (PM100: all 980 nodes) at every evaluation; nodes with no scored
+job yet have M = 1 (D50 — a data-dependent m breaks the proof below).
 
 **Why P(any node ever flagged) ≤ α under the global null (D49).** Let τ be the first evaluation
 time at which e-BH rejects at least one node (τ = ∞ if never) and T the last evaluation. τ ∧ T is a
@@ -729,7 +729,7 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D47 | 10 Oct 2026 | Decoy and shock results reported against decoy size (affected main jobs) and separately for user_decoy_heavy; the 4 degenerate shock scenarios reported apart | C4 |
 | D48 | 10 Oct 2026 | Before any full Phase 4 run: measure per-scenario runtime (Mode P recompute + Layer 2) and give the total; pilot (null: 20 bases; node: K = 1%, s = 1.3, 5 seeds, random base) shown to Mahesh first | C5 |
 | D49 | 10 Oct 2026 | Gate 4a null bound proved via the stopping time τ = first evaluation at which e-BH rejects anything: stopped e-processes are e-values, e-BH at τ controls FDR ≤ α (F17), and under the global null FDR = P(τ < ∞) ≤ α (proof in §9 Phase 4.3 and the Phase 4 report). Replaces my incomplete Markov argument | Mahesh, correction K1 |
-| D50 | 10 Oct 2026 | e-BH denominator m fixed at 972 (all PM100 nodes with a post-freeze main-population job) at every evaluation; nodes with no scored job have M = 1 | K2: a data-dependent m breaks the e-BH proof |
+| D50 | 10 Oct 2026 | e-BH denominator m fixed at 980 = all PM100 nodes, at every evaluation; nodes with no scored job have M = 1. (Mahesh's K2 said 972 = "all nodes"; 972 is the count with a post-freeze main-population job in the REAL placement only — every random-placement base checked (00, 01, 07, 19, 150) uses all 980 nodes, so m = 972 would be smaller than the number of hypotheses there. 980 is fixed and data-independent; slightly conservative on the real base. To be confirmed by Mahesh.) | K2: a data-dependent m breaks the e-BH proof |
 | D51 | 10 Oct 2026 | Guard (b) is predictable: the freeze decision for job j uses only p-values of jobs that ended strictly before j | K3 |
 | D52 | 10 Oct 2026 | The 200 random nulls share one real p-value realization (only placement varies); the Monte-Carlo SE is conditional on this trace | K4 |
 | D53 | 10 Oct 2026 | Default shock guard = the first of (a) detrend, (b) global monitor, none that passes Gate 4a null + shock; all three reported | Answer 1 |
