@@ -127,3 +127,14 @@ def test_b1_persistence():
     first = int(np.argmax(out["B1"][:, 1]))
     assert out["B1"][:, 1].any() and not out["B1"][:, 0].any()
     assert first >= 12                                   # condition from day ~10, persists 3 days
+
+
+def test_paired_check_and_before_after():
+    from hpcdiag.layer2.power import before_after, paired_check
+    ps = pd.Series([0.1, 0.2, np.nan, 0.9], index=[1, 2, 3, 4])
+    pn = pd.Series([0.3, 0.2, 0.5, 0.95], index=[1, 2, 3, 4])
+    r = paired_check(ps, pn, np.array([1, 2, 3, 4, 99]))
+    assert r["n_pairs"] == 3 and r["median_diff"] == pytest.approx(-0.05)
+    assert r["share_negative"] == pytest.approx(2 / 3) and r["share_zero"] == pytest.approx(1 / 3)
+    ba = before_after(pd.Series([0.1, 0.9, 0.5]), pd.Series([1, 5, 9]), 4)
+    assert ba == {"n_before": 1, "n_after": 2, "median_before": 0.1, "median_after": 0.7}
