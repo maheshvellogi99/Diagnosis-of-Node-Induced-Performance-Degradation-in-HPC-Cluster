@@ -61,6 +61,11 @@ def node_metrics(
                 "delay_jobs": int(((jobs > o) & (jobs <= t)).sum()) if t is not None else None,
                 "within_horizon": t is not None and (t - o) <= horizon_days * DAY_NS,
                 "has_affected_main": int(n) in affected_main_nodes,
+                # D68: right-censoring time (last evaluation) and the node's pair rate after onset
+                "censor_h": (int(eval_ns[-1]) - o) / 3.6e12,
+                "n_pairs_after": int((jobs > o).sum()),
+                "pair_rate_per_day": float((jobs > o).sum())
+                / max((int(eval_ns[-1]) - o) / DAY_NS, 1e-9),
             }
         )
     det = pd.DataFrame(det)

@@ -37,7 +37,7 @@ G: dict = {}  # per-process globals (filled by _init)
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--mode", choices=["pilot", "pilot2"], required=True)
+    ap.add_argument("--mode", choices=["pilot", "pilot2", "full"], required=True)
     ap.add_argument("--workers", type=int, default=7)
     a = ap.parse_args()
     run = start_run("phase4", a.config, tag=a.mode)
@@ -95,6 +95,19 @@ def _build_bets() -> dict:
         "Sc_a": build_shift_bets(
             pop, "score_c", fz, sb["s0"], detrend_hours=l1["guard_a_hours"], **kw
         ),
+        **{
+            f"Sc_{w}h": build_shift_bets(
+                pop,
+                "score_c",
+                fz,
+                sb["s0"],
+                window_h=w,
+                min_ref=l1["min_ref"],
+                bins=sb["bins"],
+                mode_p_on=P.mode_p_on,
+            )
+            for w in l1["sensitivity_windows_hours"]
+        },
     }
 
 
@@ -111,7 +124,7 @@ def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dic
     t0 = time.time()
     ps["P7_a"] = P.mode_p(pop, l1["window_hours"], l1["min_ref"], l1["guard_a_hours"])
     t["modeP7_guard_a"] = time.time() - t0
-    if variant_set == "pilot2":
+    if variant_set in ("pilot2", "primary2", "ablation2"):
         t0 = time.time()
         pop = P.add_centred(pop, l1["centre_window_hours"], l1["centre_min_n"])
         ps["Sc"] = P.mode_p_on(pop, "score_c", l1["window_hours"], l1["min_ref"])
@@ -119,6 +132,12 @@ def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dic
             pop, "score_c", l1["window_hours"], l1["min_ref"], l1["guard_a_hours"]
         )
         t["centred"] = time.time() - t0
+    if variant_set == "ablation2":  # D43/B6 sensitivity on S_c; Mode E as-run
+        t0 = time.time()
+        for w in l1["sensitivity_windows_hours"]:
+            ps[f"Sc_W{w}"] = P.mode_p_on(pop, "score_c", w, l1["min_ref"])
+        ps["E"] = P.mode_e_asrun(pop)
+        t["sensitivity_l1"] = time.time() - t0
     if variant_set == "ablation":
         t0 = time.time()
         for w in l1["sensitivity_windows_hours"]:
@@ -131,6 +150,26 @@ def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dic
 def _variants(variant_set: str) -> list[tuple[str, str, str, float | None, bool, str]]:
     """(name, p key, guard, J, decoy weight, bet: 'kappa' or a key of G['bets'])."""
     J = G["cfg"]["layer2"]["jumper_J"]
+    if variant_set in ("primary2", "ablation2"):  # full grid (D58 allocation, D65)
+        out = [
+            ("lr_Sc_none", "Sc", "none", J, False, "Sc"),
+            ("lr_Sc_a", "Sc_a", "a", J, False, "Sc_a"),
+        ]
+        if variant_set == "ablation2":
+            out += [
+                ("lr_Sc_b", "Sc", "b", J, False, "Sc"),  # D65: failed design, reported
+                ("kappa_Sc_none", "Sc", "none", J, False, "kappa"),  # bet ablation
+                ("plainlr_Sc_none", "Sc", "none", None, False, "Sc"),  # jumper vs plain
+                ("lr_Sc_decoyw_none", "Sc", "none", J, True, "Sc"),  # D40 decoy weight
+                ("lr_S_none", "P7", "none", J, False, "S"),  # centring ablation
+                ("kappa_S_none", "P7", "none", J, False, "kappa"),  # first-pilot primary
+                ("kappa_none_modeE", "E", "none", J, False, "kappa"),  # B6 Mode E as-run
+            ]
+            out += [
+                (f"lr_Sc_none_W{w}h", f"Sc_W{w}", "none", J, False, f"Sc_{w}h")
+                for w in G["cfg"]["layer1"]["sensitivity_windows_hours"]
+            ]
+        return out
     if variant_set == "pilot2":  # D60/D61 primary + ablations
         return [
             ("lr_Sc_none", "Sc", "none", J, False, "Sc"),
@@ -189,7 +228,7 @@ def _process(task: tuple[str, str]) -> dict:
     pairs = A.make_pairs(pop, placement)
     w_base = A.weights(pairs)
     w_decoy = None
-    if vset == "ablation":
+    if vset in ("ablation", "ablation2"):
         key = meta["job_nodes"]
         if key not in G["decoy_cache"]:
             G["decoy_cache"] = {key: A.decoy_counts(placement, G["jobs"], lc["decoy_weight_hours"])}
@@ -245,12 +284,15 @@ def _process(task: tuple[str, str]) -> dict:
         )
         if guard == "b":
             out["frozen_share"] = float(fz.mean())
+        if node_kind and name in ("lr_Sc_none", "lr_Sc_a"):
+            out["growth"] = _growth(ev, truth)  # D67 evidence budget
         res["variants"][name] = out
         T["variants"][name] = time.time() - t0
     # baselines (unguarded Mode P W = 7 d; on S_c with the LR primary in pilot2)
     t0 = time.time()
-    p = ps["Sc"] if vset == "pilot2" else ps["P7"]
-    b5_bets = G["bets"]["Sc"] if vset == "pilot2" else lc["kappas"]
+    v2 = vset in ("pilot2", "primary2", "ablation2")
+    p = ps["Sc"] if v2 else ps["P7"]
+    b5_bets = G["bets"]["Sc"] if v2 else lc["kappas"]
     cs = SEL.cumulative_node_stats(pairs, p, lc["kappas"])
     fis = A.snapshots(cs, eval_ns, m, "fis", 0.0)
     cnt = A.snapshots(cs, eval_ns, m, "cnt", 0.0)
@@ -317,11 +359,58 @@ def _evaluate(snap, eval_ns, truth, node_kind, pairs, p, extra) -> dict:
         c = MT.null_metrics(fl, eval_ns)
         if node_kind:
             nm = _metrics_from_flags(fl, eval_ns, truth, True, pairs, p, extra)
-            c.update({k: nm[k] for k in ("recall_a", "recall_b", "fdp_mean_over_time")})
+            keys = (
+                "recall_a",
+                "recall_b",
+                "fdp_mean_over_time",
+                "recall_a_within_14d",
+                "detections",
+            )
+            c.update({k: nm[k] for k in keys})
         curve[str(a)] = c
     out["alpha_curve"] = curve
     out["max_logM_final"] = float(snap[-1].max())
     return out
+
+
+def _growth(ev: pd.DataFrame, truth: pd.DataFrame) -> list[dict]:
+    """D67: per degraded node, log M at onset (last update at or before onset) and at the trace
+    end, number of updates after onset, realised mean log-growth per job-node pair after onset."""
+    out = []
+    for n, o in zip(truth["node_id"].astype(int), truth["onset_time"], strict=True):
+        o_ns = pd.Timestamp(o).value
+        e = ev[ev["node_id"] == n]
+        before, after = e[e["end_ns"] <= o_ns], e[e["end_ns"] > o_ns]
+        l0 = float(before["logM"].iloc[-1]) if len(before) else 0.0
+        l1 = float(after["logM"].iloc[-1]) if len(after) else l0
+        out.append(
+            {
+                "node_id": int(n),
+                "logM_onset": l0,
+                "logM_end": l1,
+                "n_after": int(len(after)),
+                "growth_per_pair": (l1 - l0) / len(after) if len(after) else float("nan"),
+            }
+        )
+    return out
+
+
+def _tasks_full(cfg: dict) -> list[tuple[str, str]]:
+    """Every scenario. Ablation set (D58): random-base nulls, decoys, heavy decoys, shocks and
+    the Gate 4b slice (node, random base, K = 1%, all s); everything else primary set."""
+    idx = pd.read_parquet(resolve(cfg["data"]["scenarios"]) / "index.parquet")
+    g = cfg["full"]["gate4b"]
+    rand = idx["base"] != "real"
+    abl = rand & (
+        idx["kind"].isin(["null", "user_decoy", "user_decoy_heavy", "system_shock"])
+        | ((idx["kind"] == g["kind"]) & (idx["K_pct"] == g["K_pct"]))
+    )
+    t = [
+        (sid, "ablation2" if a else "primary2")
+        for sid, a in zip(idx["scenario_id"], abl, strict=True)
+    ]
+    # nulls first so every worker caches the shared null Layer 1 early
+    return sorted(t, key=lambda x: (not x[0].startswith("null__"), x[0]))
 
 
 # ----------------------------------------------------------------------------- driver
@@ -403,8 +492,8 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
     t0 = time.time()
     _init(config_path)  # builds/validates the frozen cache
     log.info("frozen predictions: %s (%.0fs)", G["fr"].check, time.time() - t0)
-    tasks = _tasks_pilot(cfg) if mode == "pilot" else _tasks_pilot2(cfg)
-    diag = _pilot2_diagnostics(cfg, log) if mode == "pilot2" else None
+    tasks = {"pilot": _tasks_pilot, "pilot2": _tasks_pilot2, "full": _tasks_full}[mode](cfg)
+    diag = _pilot2_diagnostics(cfg, log) if mode in ("pilot2", "full") else None
     log.info("%d tasks, %d workers", len(tasks), workers)
     out_path = run.dir / "results.jsonl"
     t0 = time.time()
