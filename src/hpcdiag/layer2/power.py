@@ -34,3 +34,12 @@ def before_after(p: pd.Series, end_ns: pd.Series, onset_ns: int) -> dict:
     return {"n_before": int(len(pre)), "n_after": int(len(post)),
             "median_before": float(np.median(pre)) if len(pre) else np.nan,
             "median_after": float(np.median(post)) if len(post) else np.nan}
+
+
+def gate2_l2_for(p: np.ndarray, phase2_cfg: dict) -> dict:
+    """Gate 2-L2 (D26 thresholds, Phase 2 code) for a set of p-values (NaN = warm-up, dropped)."""
+    from hpcdiag.layer1.post_scores import TailCache, _basic, gate2_l2
+
+    m = _basic(p, phase2_cfg, TailCache(phase2_cfg))
+    m["gate2_l2"] = gate2_l2(m, phase2_cfg)
+    return m
