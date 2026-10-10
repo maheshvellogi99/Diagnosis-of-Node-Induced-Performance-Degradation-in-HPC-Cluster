@@ -42,14 +42,17 @@ def expected_multipliers(jobs: pd.DataFrame, job_nodes: pd.DataFrame, truth: pd.
                     phi = 1.0 if r["start_time"] >= t else 0.0
                 out[rid] = 1.0 + (s - 1.0) * phi
     elif kind == "user_decoy":
-        u, t0 = truth["user"].iloc[0], truth["onset_time"].iloc[0]
-        for rid, r in j.iterrows():
-            if str(r["user"]) == u and r["start_time"] >= t0:
+        u = truth["user"].iloc[0]
+        t0 = np.datetime64(truth["onset_time"].iloc[0], "us")
+        for rid, usr, st in zip(j.index, j["user"].astype(str).tolist(),
+                                j["start_time"].to_numpy().astype("datetime64[us]"), strict=True):
+            if usr == u and st >= t0:
                 out[int(rid)] = s
     elif kind == "system_shock":
-        t1, t2 = truth["onset_time"].iloc[0], truth["end_time"].iloc[0]
-        for rid, r in j.iterrows():
-            if t1 <= r["end_time"] <= t2:
+        t1 = np.datetime64(truth["onset_time"].iloc[0], "us")
+        t2 = np.datetime64(truth["end_time"].iloc[0], "us")
+        for rid, en in zip(j.index, j["end_time"].to_numpy().astype("datetime64[us]"), strict=True):
+            if t1 <= en <= t2:
                 out[int(rid)] = s
     else:
         raise ValueError(kind)
