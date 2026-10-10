@@ -189,3 +189,18 @@ def test_sliding_uniform_on_iid(seed, ties):
     p = p[np.isfinite(p)]
     assert len(p) >= 9000
     assert stats.kstest(p, "uniform").pvalue > 0.01
+
+
+def test_sliding_query_scores_shift_matches_brute_force():
+    s, e, th = _stream(800, 9)
+    q = s + 0.7
+    p, _ = sliding_window_pvalues(s, e, th, 3000, 30, query_scores=q)
+    exp = np.full(len(s), np.nan)
+    for j in range(len(s)):
+        ref = [i for i in range(j) if e[i] >= e[j] - 3000]
+        if len(ref) >= 30:
+            r = s[ref]
+            exp[j] = (np.sum(r > q[j]) + th[j] * (1 + np.sum(r == q[j]))) / (len(r) + 1)
+    np.testing.assert_allclose(p, exp, equal_nan=True)
+    p0, _ = sliding_window_pvalues(s, e, th, 3000, 30)
+    assert np.nanmedian(p) < np.nanmedian(p0)            # a positive shift lowers p-values

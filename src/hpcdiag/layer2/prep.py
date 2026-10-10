@@ -106,9 +106,18 @@ def scenario_population(
         & (jobs["run_time_s"] > pc["min_run_time_s_exclusive"])
         & (jobs["end_time"] >= fr.freeze)
     ]
-    j = j[["row_id", "user", "partition", "start_time", "end_time", "run_time_s"]].merge(
-        fr.preds, on="row_id", how="inner", validate="one_to_one"
-    )
+    cols = [
+        "row_id",
+        "user",
+        "partition",
+        "submit_time",
+        "start_time",
+        "end_time",
+        "run_time_s",
+        "nodes_req",
+        "walltime_req_s",
+    ]
+    j = j[cols].merge(fr.preds, on="row_id", how="inner", validate="one_to_one")
     j = j.sort_values(["end_time", "row_id"], kind="stable").reset_index(drop=True)
     j["score"] = log_runtime(j["run_time_s"].to_numpy()) - j["q_hat"].to_numpy()
     j["theta"] = theta[j["row_id"].to_numpy()]
@@ -158,3 +167,44 @@ def mode_e_asrun(pop: pd.DataFrame, n_min: int = 30) -> np.ndarray:
 
 def load_placement(path: str | Path) -> pd.DataFrame:
     return pd.read_parquet(resolve(path), columns=["row_id", "node_id", "n_nodes"])
+
+
+def add_centred(pop: pd.DataFrame, window_hours: float, min_n: int = 3) -> pd.DataFrame:
+    """Adds score_c (D60) and centre_level (0 shape, 1 user, 2 none) to a population frame."""
+    from hpcdiag.layer2.centred import centre_scores
+
+    sc, lev = centre_scores(
+        pop["score"].to_numpy(),
+        pop["end_ns"].to_numpy(),
+        pop["user"].astype(str).to_numpy(),
+        pop["nodes_req"].to_numpy(),
+        pop["walltime_req_s"].to_numpy(),
+        int(window_hours * H_NS),
+        min_n,
+    )
+    return pop.assign(score_c=sc, centre_level=lev)
+
+
+def mode_p_on(
+    pop: pd.DataFrame,
+    col: str,
+    window_hours: float,
+    min_ref: int,
+    detrend_hours: float | None = None,
+    query_shift: float = 0.0,
+) -> np.ndarray:
+    """Mode P on any score column; optional guard (a) detrending; optional query shift (D61:
+    p-value of S_j + shift against the unshifted reference set)."""
+    s = pop[col].to_numpy()
+    e = pop["end_ns"].to_numpy()
+    if detrend_hours:
+        s = s - sliding_median_prev(s, e, int(detrend_hours * H_NS))
+    p, _ = sliding_window_pvalues(
+        s,
+        e,
+        pop["theta"].to_numpy(),
+        int(window_hours * H_NS),
+        min_ref,
+        query_scores=s + query_shift if query_shift else None,
+    )
+    return p

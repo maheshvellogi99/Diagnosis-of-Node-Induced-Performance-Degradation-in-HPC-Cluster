@@ -138,3 +138,43 @@ def test_paired_check_and_before_after():
     assert r["share_negative"] == pytest.approx(2 / 3) and r["share_zero"] == pytest.approx(1 / 3)
     ba = before_after(pd.Series([0.1, 0.9, 0.5]), pd.Series([1, 5, 9]), 4)
     assert ba == {"n_before": 1, "n_after": 2, "median_before": 0.1, "median_after": 0.7}
+
+
+def _brute_centre(s, e, u, nr, wt, W, min_n=3):
+    out, lev = s.copy(), np.full(len(s), 2)
+    for j in range(len(s)):
+        prev = [i for i in range(len(s)) if e[i] < e[j] and e[i] >= e[j] - W]
+        a = [s[i] for i in prev if u[i] == u[j] and nr[i] == nr[j] and wt[i] == wt[j]]
+        b = [s[i] for i in prev if u[i] == u[j]]
+        if len(a) >= min_n:
+            out[j], lev[j] = s[j] - np.median(a), 0
+        elif len(b) >= min_n:
+            out[j], lev[j] = s[j] - np.median(b), 1
+    return out, lev
+
+
+def test_centre_scores_matches_brute_force():
+    from hpcdiag.layer2.centred import centre_scores
+    rng = np.random.default_rng(3)
+    n = 600
+    e = np.sort(rng.integers(0, 3000, n))               # many ties in end time
+    s = rng.standard_normal(n)
+    u = rng.choice(["a", "b", "c"], n)
+    nr = rng.choice([1, 2], n)
+    wt = rng.choice([600.0, 3600.0], n)
+    got, lev = centre_scores(s, e, u, nr, wt, 500)
+    exp, elev = _brute_centre(s, e, u, nr, wt, 500)
+    np.testing.assert_allclose(got, exp)
+    np.testing.assert_array_equal(lev, elev)
+    assert set(np.unique(lev)) == {0, 1, 2}
+
+
+def test_centre_scores_excludes_equal_end_times():
+    from hpcdiag.layer2.centred import centre_scores
+    s = np.array([1.0, 2.0, 3.0, 10.0, 10.0])
+    e = np.array([0, 1, 2, 5, 5])
+    u = np.array(["a"] * 5)
+    sc, lev = centre_scores(s, e, u, np.ones(5), np.ones(5), 100)
+    # jobs 3 and 4 end together: each sees only jobs 0-2 (median 2), not each other
+    np.testing.assert_allclose(sc[3:], [8.0, 8.0])
+    assert lev.tolist() == [2, 2, 2, 0, 0]

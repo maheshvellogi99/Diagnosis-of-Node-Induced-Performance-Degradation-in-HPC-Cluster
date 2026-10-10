@@ -88,13 +88,16 @@ def smoothed_split_pvalues(cal_scores: np.ndarray, test_scores: np.ndarray,
 
 def sliding_window_pvalues(scores: np.ndarray, end_ns: np.ndarray, theta: np.ndarray,
                            window_ns: int, min_ref: int,
-                           keys: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+                           keys: np.ndarray | None = None,
+                           query_scores: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Mode P (D22): pooled sliding-window smoothed conformal p-values.
 
     Inputs must be in D14 order (end_time, then row_id). For job j the reference set R_j is all
     EARLIER jobs (same key, if keys are given) with end_time >= end_time_j - window:
         p_j = (#{i in R_j : S_i > S_j} + theta_j (1 + #{i in R_j : S_i = S_j})) / (|R_j| + 1).
-    If |R_j| < min_ref, p_j = NaN (warm-up). Returns (p, |R_j|)."""
+    If |R_j| < min_ref, p_j = NaN (warm-up). Returns (p, |R_j|).
+    query_scores (D61): if given, p_j is computed for query_scores[j] against the reference set
+    built from `scores` (e.g. a shifted score of j against the unshifted history)."""
     s = np.asarray(scores, dtype="float64")
     e = np.asarray(end_ns, dtype="int64")
     th = np.asarray(theta, dtype="float64")
@@ -103,6 +106,7 @@ def sliding_window_pvalues(scores: np.ndarray, end_ns: np.ndarray, theta: np.nda
     if len(e) > 1 and np.any(np.diff(e) < 0):
         raise ValueError("end times must be non-decreasing (D14 order)")
     k = np.zeros(len(s), dtype=np.int64) if keys is None else np.asarray(keys)
+    q = None if query_scores is None else np.asarray(query_scores, dtype="float64")
     state: dict = {}
     p = np.full(len(s), np.nan)
     nref = np.zeros(len(s), dtype="int64")
@@ -117,9 +121,10 @@ def sliding_window_pvalues(scores: np.ndarray, end_ns: np.ndarray, theta: np.nda
         m = len(sl)
         nref[j] = m
         if m >= min_ref:
-            right = sl.bisect_right(s[j])
+            qj = s[j] if q is None else q[j]
+            right = sl.bisect_right(qj)
             n_gt = m - right
-            n_eq = right - sl.bisect_left(s[j])
+            n_eq = right - sl.bisect_left(qj)
             p[j] = (n_gt + th[j] * (1.0 + n_eq)) / (m + 1.0)
         sl.add(s[j])
         dq.append((e[j], s[j]))
