@@ -29,7 +29,7 @@ def plain_mixture_logM(lb: np.ndarray) -> np.ndarray:
     """Running log M after each step of ONE stream: log mean_kappa exp(cumsum log g_kappa)."""
     c = np.cumsum(lb, axis=0)
     mx = c.max(axis=1, keepdims=True)
-    return (mx[:, 0] + np.log(np.mean(np.exp(c - mx), axis=1)))
+    return mx[:, 0] + np.log(np.mean(np.exp(c - mx), axis=1))
 
 
 def jumper_init(n_streams: int, n_states: int) -> np.ndarray:
@@ -73,7 +73,7 @@ def node_logM_by_rank(node: np.ndarray, lb: np.ndarray, J: float | None) -> np.n
     node together (vectorised). J=None -> plain mixture; else jumper with switching rate J."""
     node = np.asarray(node)
     n, K = lb.shape
-    order = np.argsort(node, kind="stable")              # group by node, keep processing order
+    order = np.argsort(node, kind="stable")  # group by node, keep processing order
     nd = node[order]
     starts = np.r_[0, np.flatnonzero(np.diff(nd)) + 1]
     rank = np.arange(n) - np.repeat(starts, np.diff(np.r_[starts, n]))
@@ -81,7 +81,7 @@ def node_logM_by_rank(node: np.ndarray, lb: np.ndarray, J: float | None) -> np.n
     if J is None:
         c = np.empty((n, K))
         lbo = lb[order]
-        for k in range(K):                                  # cumulative sums within node groups
+        for k in range(K):  # cumulative sums within node groups
             cs = np.cumsum(lbo[:, k])
             base = np.repeat(np.r_[0.0, cs[starts[1:] - 1]], np.diff(np.r_[starts, n]))
             c[:, k] = cs - base
@@ -98,3 +98,13 @@ def node_logM_by_rank(node: np.ndarray, lb: np.ndarray, J: float | None) -> np.n
         logC[g] = jumper_step(logC[g], lg, J)
         out[order[idx]] = log_total(logC[g])
     return out
+
+
+def log_bet_funcs(p: np.ndarray, w: np.ndarray, funcs) -> np.ndarray:
+    """log(1 + w (g(p) - 1)) for arbitrary bet densities g (each with integral 1) as columns."""
+    p = np.asarray(p, float)
+    w = np.broadcast_to(np.asarray(w, float), p.shape)
+    if np.any((w < 0) | (w > 1)):
+        raise ValueError("weights must be in [0, 1]")
+    with np.errstate(divide="ignore"):
+        return np.column_stack([np.log1p(w * (g(p) - 1.0)) for g in funcs])

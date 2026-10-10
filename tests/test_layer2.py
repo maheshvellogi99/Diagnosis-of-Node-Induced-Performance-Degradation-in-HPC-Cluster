@@ -178,3 +178,39 @@ def test_centre_scores_excludes_equal_end_times():
     # jobs 3 and 4 end together: each sees only jobs 0-2 (median 2), not each other
     np.testing.assert_allclose(sc[3:], [8.0, 8.0])
     assert lev.tolist() == [2, 2, 2, 0, 0]
+
+
+def test_hist_bet_integrates_to_one_nonneg_and_predictable():
+    from scipy import integrate
+
+    from hpcdiag.layer2.bets import build_shift_bets, hist_bet
+    from hpcdiag.layer2.prep import mode_p_on
+    g = hist_bet(np.random.default_rng(0).beta(0.6, 1.0, 5000), 20, "g")
+    edges = np.linspace(0, 1, 21)
+    val = sum(integrate.quad(lambda x: float(g(np.array([x]))[0]), a, b)[0]
+              for a, b in zip(edges[:-1], edges[1:], strict=True))
+    assert abs(val - 1) < 1e-9 and (g.density >= 0).all()
+    assert g(np.array([0.0]))[0] > g(np.array([1.0]))[0]          # beta(0.6, 1): small p favoured
+    # predictable: data after freeze + 7 d never changes the bets
+    rng = np.random.default_rng(1)
+    n = 3000
+    freeze = 0
+    e = np.sort(rng.integers(0, 20 * DAY, n))
+    pop = pd.DataFrame({"score": rng.standard_normal(n), "end_ns": e,
+                        "theta": rng.uniform(size=n)})
+    b1 = build_shift_bets(pop, "score", freeze, [1.3, 2.0], 168, 30, mode_p_on=mode_p_on)
+    pop2 = pop.copy()
+    late = pop2["end_ns"] > 7 * DAY
+    pop2.loc[late, "score"] += 100.0
+    b2 = build_shift_bets(pop2, "score", freeze, [1.3, 2.0], 168, 30, mode_p_on=mode_p_on)
+    for x, y in zip(b1, b2, strict=True):
+        np.testing.assert_array_equal(x.density, y.density)
+    assert b1[1].density[0] > b1[0].density[0] > 1                # larger shift -> more mass near 0
+
+
+def test_log_bet_funcs_and_node_evidence_with_hist_bets():
+    from hpcdiag.layer2.bets import HistBet
+    from hpcdiag.stats.evalues import log_bet_funcs
+    g = HistBet(np.r_[np.full(10, 1.5), np.full(10, 0.5)], "g", 1)
+    lb = log_bet_funcs(np.array([0.1, 0.9]), np.array([1.0, 0.5]), [g])
+    np.testing.assert_allclose(lb[:, 0], np.log([1.5, 1 + 0.5 * (0.5 - 1)]))

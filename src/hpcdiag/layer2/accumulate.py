@@ -8,7 +8,14 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from hpcdiag.stats.evalues import jumper_init, jumper_step, log_bet, log_total, node_logM_by_rank
+from hpcdiag.stats.evalues import (
+    jumper_init,
+    jumper_step,
+    log_bet,
+    log_bet_funcs,
+    log_total,
+    node_logM_by_rank,
+)
 
 H_NS = 3600 * 10**9
 
@@ -83,7 +90,10 @@ def node_evidence(
     use = np.isfinite(pj)
     if frozen_job is not None:
         use &= ~frozen_job[pk]
-    lb = log_bet(pj[use], w[use], kappas)
+    if len(kappas) and callable(kappas[0]):
+        lb = log_bet_funcs(pj[use], w[use], kappas)  # D61 histogram bets
+    else:
+        lb = log_bet(pj[use], w[use], kappas)
     node = pairs["node_id"].to_numpy()[use]
     lm = node_logM_by_rank(node, lb, J)
     return pd.DataFrame({"node_id": node, "end_ns": pairs["end_ns"].to_numpy()[use], "logM": lm})
