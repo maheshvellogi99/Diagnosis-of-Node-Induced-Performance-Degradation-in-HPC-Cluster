@@ -169,6 +169,9 @@ All tables are parquet in `data/processed/`. Column names are fixed here; Phase 
 **`truth_<scenario_id>.parquet`** (Phase 3)
 | node_id | onset_time | end_time | factor | kind (`node`, `user_decoy`, `system_shock`) |
 
+Phase 3 extension (D30, D34): `node_id` nullable (null for user_decoy and system_shock), plus
+`cause` (node kinds), `user` (user_decoy), `scenario_id`; kind also `node_partial`; the `null` kind has an empty truth table.
+
 ---
 
 ## 4. Datasets
@@ -459,6 +462,12 @@ shorter window. The rule never looks at p-values or at anything after day 90.
 - **Censoring.** If T' exceeds the job's time limit, set T' = limit and `censored = TRUE`.
 - Each scenario has ≥ 20 random seeds.
 - Onsets t₀ (and shock windows t₁) must fall after the PM100 warm-up chosen in Phase 2 (D15).
+- Phase 3 rules (D29–D35, 10 Oct 2026): two bases — random placement (primary, exact truth) and real
+  placement (secondary); per-node `cause` ∈ {cpu, cache, mbw}; onsets uniform on [Mode E freeze + 7 d,
+  trace end − 14 d], independent per degraded node, redrawn if inside a listed submission gap;
+  degradation lasts to the trace end; only COMPLETED/TIMEOUT rows can be affected; the run_time > 30 s
+  main-population filter is applied AFTER injection (Phase 4 re-filters); a "null" kind (no injection)
+  exists for every base; scenario seed k uses random-placement base k.
 
 **Gate 3.** Unit tests show: unaffected jobs are byte-identical; affected jobs follow the formula;
 truth tables match the injected set exactly.
@@ -686,3 +695,10 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D26 | 10 Oct 2026 | Gate 2 revised: original Gate 2 kept and reported; Gate 2-L2 (Mode P, W = 7 d, PM100 main; also test days ≥ 90; Eagle reported) gates the Layer-1 input to Layer 2 | Approved by Mahesh in PROMPT 2B |
 | D27 | 10 Oct 2026 | Gate 2-L2 recorded exactly as measured: "PM100 main PASS; D21 subset (test days ≥ 90) FAIL on KS (0.0232 > 0.02), all other D26 checks pass on that subset; Eagle FAIL (extreme tail)". The gate is NOT relaxed after the fact. We proceed because the gate's purpose (a valid input to Layer 2) is measured directly by Gate 4a, which becomes binding: if Gate 4a fails on the random-placement base with Mode P p-values, we stop and return to Layer 1 | Decision by Mahesh after Phase 2 review (`reports/phase_2.md`) |
 | D28 | 10 Oct 2026 | Mode P (pooled, W = 7 d, main population) is the Layer-2 input. Threats added to §12: W chosen on PM100 itself and narrow pass (W = 1 d, 365 d fail); marginal-only calibration (q̂ decile 10 FA 0.004, walltime decile 10 FA 0.123); Eagle extreme tail fails, no generality claim | Decision by Mahesh after Phase 2 review |
+| D29 | 10 Oct 2026 | Two base traces per scenario: random placement (PRIMARY; each job's node set replaced by |N_j| distinct nodes drawn uniformly from its partition's nodes, seeded, one draw per base seed) and real placement (SECONDARY; flags on non-injected nodes are "unknown truth") | PROMPT 3 addendum A1: exact truth needs no real slow node and no user-node link |
+| D30 | 10 Oct 2026 | Truth table has a `cause` per degraded node from {cpu, cache, mbw} (equal mix, seeded); memory-pressure causes are not injected as slowdowns | Addendum A2; HPAS memleak/memeater did not visibly slow applications (LAYER3_DESIGN F23) |
+| D31 | 10 Oct 2026 | Onset t₀ ≥ PM100 Mode E freeze time + 7 d (no injected job in the frozen model's training rows or Mode P's warm-up) and never inside a submission gap listed in the data card | Addendum A3 (updated after Phase 2 review) |
+| D32 | 10 Oct 2026 | s ∈ {1.1, 1.2, 1.3, 1.5} | Addendum A4; compared with Phase 6.3 measurements later |
+| D33 | 10 Oct 2026 | Report per scenario: affected jobs, affected nodes, censored jobs; for random placement the per-node job counts; the full scenario grid with counts per kind and base | Addendum A5 and Mahesh's answer 8 |
+| D34 | 10 Oct 2026 | Injection rules: only COMPLETED/TIMEOUT rows can be affected (others copied unchanged); main-population filter (run_time > 30 s) applied after injection, jobs crossing 30 s reported; independent onset per degraded node, uniform on [freeze + 7 d, trace end − 14 d], redrawn if in a listed gap (same range for shock t₁); degradation lasts to the trace end; decoy user drawn from users with ≥ 50 main-population jobs starting after that scenario's t₀ (t₀/user redrawn if none; redraws recorded); censoring T' = max(T, limit) if s·T > limit; start times fixed | Mahesh's answers 1–5 to the Phase 3 plan |
+| D35 | 10 Oct 2026 | A "null" kind (no injection) for every base: 20 random-placement bases + the real base; scenario seed k uses random-placement base k so every scenario has a matching null on the same placement | Exact null for Gate 4a (Mahesh's answers 6–7) |
