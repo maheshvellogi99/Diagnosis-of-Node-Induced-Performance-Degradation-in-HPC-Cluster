@@ -87,9 +87,10 @@ W and the q̂-decile variant are reported in §5.
 - **Tail checks (D24).** P(p ≤ 1e-3), P(p ≤ 1e-4) and mean f(p), f = average over κ ∈ {0.05, 0.1, 0.25, 0.5} of
   κ p^(κ−1), against its null from 300 simulated U(0,1) samples of the same n (seed 2024). Under uniform p the
   sample mean is usually below 1, so it is compared with the simulated null, not with 1.
-- **ACI (D25).** Gibbs & Candès Prop. 4.1, as recalled by the architect — UNKNOWN, needs check (the paper's PDF is
-  not in the project folder): the long-run error of ONE stream is bounded by (max(α₁, 1 − α₁) + γ)/(γT). With
-  γ = 0.005 a per-user stream of T = 50 jobs has a bound near 4, i.e. no guarantee. ACI for the gate is therefore
+- **ACI (D25).** Gibbs & Candès (NeurIPS 2021), Proposition 4.1, eq. (5): "With probability one we have that for
+  all T ∈ ℕ, | (1/T) Σ_{t=1..T} err_t − α | ≤ (max{α₁, 1 − α₁} + γ) / (T γ)" — verified by the architect against
+  the PDF. The bound applies to ONE stream; with γ = 0.005 a per-user stream of T = 50 jobs has a bound near 4,
+  i.e. no guarantee. ACI for the gate is therefore
   one global stream (all jobs, D14 order); per-user ACI is descriptive only.
 - **Gate 2-L2 (D26).** On PM100 main, Mode P W = 7 d: KS ≤ 0.02; FA within α ± 0.01 at α ∈ {0.01, 0.05, 0.10};
   P(p ≤ 1e-3) ≤ 0.002; mean f(p) ≤ simulated-null 95th percentile; global-stream ACI rate within 0.05 ± 0.005.
@@ -145,6 +146,18 @@ D21 / test-day subsets (Mode P, W = 7 d):
 | pm100 Mode E all, test days | 103,699 | 0.0542 | 0.0121 / 0.0538 / 0.0900 | 0.00099 | 1.086 (1.123) | 0.0501 | **FAIL** |
 | eagle Mode E main, test days | 1,219,648 | 0.0222 | 0.0091 / 0.0467 / 0.0925 | 0.00142 | 1.239 (1.070) | 0.0500 | **FAIL** |
 | eagle Mode E all, test days | 1,358,746 | 0.0123 | 0.0105 / 0.0449 / 0.0913 | 0.00115 | 0.803 (1.059) | 0.0500 | pass |
+
+### 5a. Mode P, W = 7 d: p-value histograms and where the KS distance is reached
+
+![Mode P W = 7 d p-values](figures/phase2_modeP7d_pvalue_hist.png)
+
+| set | n | KS = max over p of abs(F_n(p) − p) | p where the maximum is reached | F_n there | sign |
+|---|---|---|---|---|---|
+| PM100 main, all post-freeze | 102,090 | 0.0131 | 0.9078 | 0.8946 | - |
+| PM100 main, test days ≥ 90 (D21) | 69,530 | 0.0232 | 0.8888 | 0.8656 | - |
+| Eagle main, all post-freeze | 7,268,577 | 0.0116 | 0.9003 | 0.8886 | - |
+
+Sign + means F_n(p) > p at that point: more p-values at or below it than under uniformity; sign − means fewer. Descriptive only; no new model run.
 
 ## 6. Per run: calibration, tails, ACI, baselines
 
@@ -395,4 +408,4 @@ uv run python scripts/make_phase2_report.py --select 20261009-232341-pm100-selec
 - PM100 window selection (D18, run `20261009-232341-pm100-select-main-full`): pooled pinball (τ = 0.9, log runtime) L = 30: 0.2151, L = 45: 0.2058, L = 60: 0.2085 → **L = 45** (within 1% of best: [45]). Two of the 16 selection days had no test jobs (PM100 submission gap 2020-08-01 14:20:56 → 2020-08-04 08:16:52, data card).
 - Option (b) (approved): Eagle Mode A "all" was run in fast mode only.
 - Mode P contract tables (W = 7 d, NaN warm-up rows dropped): `data/processed/layer1_scores_pm100_20261010-013303-post-full_modeP_main.parquet`; `data/processed/layer1_scores_pm100_20261010-013303-post-full_modeP_all.parquet`; `data/processed/layer1_scores_eagle_20261010-013303-post-full_modeP_main.parquet`; `data/processed/layer1_scores_eagle_20261010-013303-post-full_modeP_all.parquet`
-- Tests: `124 passed in 5.48s`; lint: `All checks passed!`.
+- Tests: `125 passed in 6.06s`; lint: `All checks passed!`.

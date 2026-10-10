@@ -139,3 +139,26 @@ def pvalue_hists(p: np.ndarray, users: np.ndarray, k: int, title: str, out: Path
     fig.savefig(out, dpi=150, facecolor=SURFACE)
     plt.close(fig)
     return out
+
+
+def pvalue_panels(panels: list[tuple[str, np.ndarray]], title: str, out: Path) -> Path:
+    """One density histogram (20 bins) per (name, p-values) panel; uniform = dashed line at 1."""
+    fig, axes = plt.subplots(1, len(panels), figsize=(3.7 * len(panels), 3.2), squeeze=False)
+    fig.patch.set_facecolor(SURFACE)
+    bins = np.linspace(0, 1, 21)
+    for ax, (name, p) in zip(axes[0], panels, strict=True):
+        p = np.asarray(p, float)
+        p = p[np.isfinite(p)]
+        ax.hist(p, bins=bins, density=True, color=SERIES_1, edgecolor=SURFACE, linewidth=1)
+        ax.axhline(1.0, color=INK_2, lw=1, ls="--")
+        ax.set_title(f"{name} (n={len(p):,})", color=INK, fontsize=9, loc="left")
+        ax.set_xlim(0, 1)
+        ax.set_xlabel("p-value")
+        _style(ax)
+    axes[0][0].set_ylabel("density (uniform = 1)")
+    fig.suptitle(title, color=INK, fontsize=11, x=0.01, ha="left")
+    fig.tight_layout()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=150, facecolor=SURFACE)
+    plt.close(fig)
+    return out

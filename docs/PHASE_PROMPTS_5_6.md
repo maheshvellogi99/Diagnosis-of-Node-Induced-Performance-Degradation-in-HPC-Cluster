@@ -113,7 +113,8 @@ A1. Two base traces for every scenario:
 A2. Truth table gets a `cause` column for node scenarios, drawn per degraded node from {cpu, cache, mbw} (equal mix, seeded).
     memory-pressure causes are not injected as slowdowns (HPAS: memleak/memeater did not visibly slow applications,
     LAYER3_DESIGN F23); they enter only in Phase 5 simulations.
-A3. Onset t0 never in the first 30 days, and never inside a submission gap listed in docs/data_cards/pm100.md.
+A3. Onset t0 >= PM100 Mode E freeze time + 7 days (so no injected job is in the frozen model's training rows or in
+    Mode P's warm-up), and never inside a submission gap listed in the data card.
 A4. Keep s in {1.1, 1.2, 1.3, 1.5}; Phase 6.3 will measure real slowdowns and we will compare.
 A5. Report per scenario: affected jobs, affected nodes, censored jobs, and for random placement the per-node job counts.
 ```
@@ -135,6 +136,8 @@ B4. The system-shock guard (a) detrends S before Mode P is applied: S'_j = S_j -
     before end_time_j); then Mode P on S'. Guard (b) unchanged.
 B5. Add a tail test to the e-process tests: on simulated null streams with p-values from Mode P applied to IID scores,
     the empirical P(max M >= 1/alpha) <= alpha + Monte-Carlo error.
+B6. Also run Gate 4a with (i) Mode P W = 1 d and W = 365 d and (ii) Mode E as-run p-values, as sensitivity and ablation.
+    Gate 4a is decided on W = 7 d only.
 ```
 
 ---

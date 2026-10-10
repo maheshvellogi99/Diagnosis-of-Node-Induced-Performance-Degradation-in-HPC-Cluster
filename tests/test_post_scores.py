@@ -68,3 +68,17 @@ def test_node_check_dispersion_one_under_binomial(tmp_path):
     assert out["n_nodes"] == n_nodes
     assert 0.6 < out["dispersion_ratio"] < 1.5          # single-node jobs, no node effect
     assert "NOT valid tests" in out["warning"]
+
+
+def test_ks_location_hand_and_matches_scipy():
+    from scipy import stats as sst
+
+    from hpcdiag.eval.conformal_metrics import ks_location
+    # 4 points all at 0.1: F_n jumps to 1 at 0.1 -> D+ = 1 - 0.1 = 0.9, sign +
+    r = ks_location(np.array([0.1, 0.1, 0.1, 0.1]))
+    assert r["sign"] == "+" and r["p_at_max"] == pytest.approx(0.1)
+    assert r["ks"] == pytest.approx(0.9)
+    r = ks_location(np.array([0.9, 0.95]))                  # too few small p -> sign -
+    assert r["sign"] == "-" and r["p_at_max"] == pytest.approx(0.9)
+    p = np.random.default_rng(0).beta(0.9, 1, 5000)
+    assert ks_location(p)["ks"] == pytest.approx(sst.kstest(p, "uniform").statistic)

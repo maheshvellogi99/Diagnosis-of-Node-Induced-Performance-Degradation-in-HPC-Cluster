@@ -137,3 +137,18 @@ def _median_ratio(ub: np.ndarray, df: pd.DataFrame, fin: np.ndarray) -> float:
     if not fin.any() or "q50_log" not in df:
         return float("nan")
     return float(np.median(np.exp(ub[fin] - df["q50_log"].to_numpy()[fin])))
+
+
+def ks_location(p: np.ndarray) -> dict:
+    """Where |F_n(p) - p| is largest, and its sign (+: more small p-values than uniform up to
+    that point, i.e. F_n(p) > p; -: fewer). Returns the KS distance too."""
+    x = np.sort(np.asarray(p, float)[np.isfinite(p)])
+    n = len(x)
+    i = np.arange(1, n + 1)
+    d_plus = i / n - x            # F_n just after x_i minus x_i
+    d_minus = x - (i - 1) / n     # x_i minus F_n just before x_i
+    jp, jm = int(np.argmax(d_plus)), int(np.argmax(d_minus))
+    if d_plus[jp] >= d_minus[jm]:
+        return {"ks": float(d_plus[jp]), "p_at_max": float(x[jp]), "sign": "+",
+                "F_n": float((jp + 1) / n)}
+    return {"ks": float(d_minus[jm]), "p_at_max": float(x[jm]), "sign": "-", "F_n": float(jm / n)}

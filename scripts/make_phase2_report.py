@@ -18,7 +18,10 @@ import subprocess
 import sys
 
 import numpy as np
+import pandas as pd
 
+from hpcdiag.eval.conformal_metrics import ks_location
+from hpcdiag.eval.plots import pvalue_panels
 from hpcdiag.utils.run import PROJECT_ROOT, resolve
 
 BINS = ["0-1h", "1-6h", "6-24h", "1-2d", ">2d"]
@@ -205,9 +208,10 @@ W and the q̂-decile variant are reported in §5.
 - **Tail checks (D24).** P(p ≤ 1e-3), P(p ≤ 1e-4) and mean f(p), f = average over κ ∈ {0.05, 0.1, 0.25, 0.5} of
   κ p^(κ−1), against its null from 300 simulated U(0,1) samples of the same n (seed 2024). Under uniform p the
   sample mean is usually below 1, so it is compared with the simulated null, not with 1.
-- **ACI (D25).** Gibbs & Candès Prop. 4.1, as recalled by the architect — UNKNOWN, needs check (the paper's PDF is
-  not in the project folder): the long-run error of ONE stream is bounded by (max(α₁, 1 − α₁) + γ)/(γT). With
-  γ = 0.005 a per-user stream of T = 50 jobs has a bound near 4, i.e. no guarantee. ACI for the gate is therefore
+- **ACI (D25).** Gibbs & Candès (NeurIPS 2021), Proposition 4.1, eq. (5): "With probability one we have that for
+  all T ∈ ℕ, | (1/T) Σ_{t=1..T} err_t − α | ≤ (max{α₁, 1 − α₁} + γ) / (T γ)" — verified by the architect against
+  the PDF. The bound applies to ONE stream; with γ = 0.005 a per-user stream of T = 50 jobs has a bound near 4,
+  i.e. no guarantee. ACI for the gate is therefore
   one global stream (all jobs, D14 order); per-user ACI is descriptive only.
 - **Gate 2-L2 (D26).** On PM100 main, Mode P W = 7 d: KS ≤ 0.02; FA within α ± 0.01 at α ∈ {0.01, 0.05, 0.10};
   P(p ≤ 1e-3) ≤ 0.002; mean f(p) ≤ simulated-null 95th percentile; global-stream ACI rate within 0.05 ± 0.005.
@@ -248,6 +252,27 @@ W and the q̂-decile variant are reported in §5.
         s += (f"| {label(R[r])}, test days | {f(x['n'])} | {f(x['ks'])} | " + " / ".join(f(v) for v in x["fa"].values())
               + f" | {f(t['p_le']['0.001'], 5)} | {f(t['mean_f'], 3)} ({f(t['null_mean_f']['p95'], 3)}) | {f(x['aci_global']['0.005'])} | {ok(x['gate2_l2']['pass'])} |\n")
     s += "\n"
+
+    # ---- Mode P W = 7 d histograms and KS location (added after the Phase 2 review)
+    def modep(rid):
+        mp = pd.read_parquet(resolve(f"runs/phase2/{a.post}/modep_{rid}.parquet"), columns=["row_id", "p_global_7d"])
+        td = pd.read_parquet(resolve(f"runs/phase2/{rid}/scores_eval.parquet"), columns=["row_id", "test_day"])
+        return mp.merge(td, on="row_id", how="left", validate="one_to_one")
+    pmd, egd = modep(pm_e), modep(eg_e)
+    sets = [("PM100 main, all post-freeze", pmd["p_global_7d"].to_numpy()),
+            ("PM100 main, test days ≥ 90 (D21)", pmd.loc[pmd["test_day"], "p_global_7d"].to_numpy()),
+            ("Eagle main, all post-freeze", egd["p_global_7d"].to_numpy())]
+    pvalue_panels(sets, "Mode P (pooled, W = 7 d): p-values (warm-up NaN excluded)",
+                  figs / "phase2_modeP7d_pvalue_hist.png")
+    s += "### 5a. Mode P, W = 7 d: p-value histograms and where the KS distance is reached\n\n"
+    s += "![Mode P W = 7 d p-values](figures/phase2_modeP7d_pvalue_hist.png)\n\n"
+    s += ("| set | n | KS = max over p of abs(F_n(p) − p) | p where the maximum is reached | F_n there | sign |\n|---|---|---|---|---|---|\n")
+    for nm, pv in sets:
+        k = ks_location(pv)
+        n_ok = int(np.isfinite(pv).sum())
+        s += f"| {nm} | {f(n_ok)} | {f(k['ks'])} | {f(k['p_at_max'])} | {f(k['F_n'])} | {k['sign']} |\n"
+    s += ("\nSign + means F_n(p) > p at that point: more p-values at or below it than under uniformity; sign − means fewer. "
+          "Descriptive only; no new model run.\n\n")
 
     # ---------------------------------------------------------------- 6. main table per run
     s += "## 6. Per run: calibration, tails, ACI, baselines\n\n"

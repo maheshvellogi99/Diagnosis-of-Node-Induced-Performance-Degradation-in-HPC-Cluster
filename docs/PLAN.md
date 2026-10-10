@@ -416,6 +416,9 @@ at α ∈ {0.01, 0.05, 0.10}; P(p ≤ 1e-3) ≤ 0.002; mean f(p) ≤ simulated-n
 global-stream ACI rate within α ± 0.005. Also on PM100 test days ≥ 90 (D21); the same table is
 reported for Eagle main (Eagle does not feed Layer 2). Decile tables (q̂, walltime_req_s) reported,
 not gated. If PM100 Mode P fails Gate 2-L2: STOP and report; no further windows.
+**Gate 2-L2 result (D27, recorded exactly as measured, not relaxed):** PM100 main PASS; D21 subset
+(test days ≥ 90) FAIL on KS (0.0232 > 0.02), all other D26 checks pass on that subset; Eagle FAIL
+(extreme tail). Mode P (pooled, W = 7 d, main population) is the Layer-2 input (D28).
 
 **Gate 2 (original; kept and reported, D26).** Checked separately on Eagle and PM100, main population (D17). Mode E (fallback
 grouping, D19) on all post-freeze jobs: KS distance of pooled p-values to uniform ≤ 0.02, and
@@ -509,7 +512,8 @@ After a node is flagged and handed to Layer 3, its M is reset to 1 once it is cl
 (degraded nodes flagged), detection delay (hours and jobs after onset), false flags in decoy and
 shock scenarios, number of flags per day on clean data.
 
-**Gate 4a (validity, clean data).** On unmodified PM100 and on decoy/shock scenarios:
+**Gate 4a (validity, clean data) — binding (D27).** If Gate 4a fails on the random-placement base
+with Mode P p-values, we stop and return to Layer 1. On unmodified PM100 and on decoy/shock scenarios:
 empirical FDR ≤ α (+ 2 standard errors) and mean false flags per day reported; B2 must show
 its fixed false-flag rate (sanity check).
 **Gate 4b (power).** At s = 1.3 and K = 1%: recall reported with detection delay; target ≥ 0.8
@@ -595,6 +599,9 @@ end, status, key metrics. Reports cite run ids.
 | PM100 contains only exclusive jobs | state as limitation; shared-node jobs future work |
 | PM100 has no job name, so baseline B1 drops the "≥ 3 applications" condition (D13) | state as limitation; B1 on PM100 is weaker than the guide's rule as written |
 | Eagle `job_id` repeats (rows on 6,751 ids) | `row_id` key (D10); Phase 1 sensitivity run without exact duplicate rows |
+| Mode P window W = 7 d was chosen on PM100 itself and the pass is narrow (W = 1 d and W = 365 d fail Gate 2-L2) (D28) | Gate 4a binding (D27); Gate 4a also run with W = 1 d, 365 d and Mode E as sensitivity/ablation (PROMPT 4 addendum B6) |
+| Mode P calibration is marginal only: decile tables show poor conditional calibration (PM100 Mode P W = 7 d: q̂ decile 10 FA 0.004, walltime decile 10 FA 0.123 at α = 0.05) — a risk under real node placement (D28) | Report conditional tables; random-placement base is primary for Gate 4a; real-placement flags labelled "unknown truth" |
+| Eagle's extreme tail fails Gate 2-L2 (D28) | No claim of generality across systems |
 | Nagios labels mark offline nodes, not slow nodes | used only as exploratory precursor analysis |
 | e-BH conservative (F18) | report power honestly; compare with BH (B3) |
 | Small cluster for Phase 6 | primary results from PM100 semi-synthetic; Phase 6 as demonstration |
@@ -677,3 +684,5 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D24 | 10 Oct 2026 | Tail checks for every mode: P(p ≤ 1e-3), P(p ≤ 1e-4), mean mixture f(p) vs a 300-sample simulated null | Layer 2 bets with κ down to 0.05; FA at α ≥ 0.01 cannot certify the tail |
 | D25 | 10 Oct 2026 | ACI for the gate = one global stream (D14 order); per-user ACI descriptive only | The per-stream bound (max(α₁,1−α₁)+γ)/(γT) gives no guarantee for short per-user streams (bound as recalled by the architect — paper not in project, needs check) |
 | D26 | 10 Oct 2026 | Gate 2 revised: original Gate 2 kept and reported; Gate 2-L2 (Mode P, W = 7 d, PM100 main; also test days ≥ 90; Eagle reported) gates the Layer-1 input to Layer 2 | Approved by Mahesh in PROMPT 2B |
+| D27 | 10 Oct 2026 | Gate 2-L2 recorded exactly as measured: "PM100 main PASS; D21 subset (test days ≥ 90) FAIL on KS (0.0232 > 0.02), all other D26 checks pass on that subset; Eagle FAIL (extreme tail)". The gate is NOT relaxed after the fact. We proceed because the gate's purpose (a valid input to Layer 2) is measured directly by Gate 4a, which becomes binding: if Gate 4a fails on the random-placement base with Mode P p-values, we stop and return to Layer 1 | Decision by Mahesh after Phase 2 review (`reports/phase_2.md`) |
+| D28 | 10 Oct 2026 | Mode P (pooled, W = 7 d, main population) is the Layer-2 input. Threats added to §12: W chosen on PM100 itself and narrow pass (W = 1 d, 365 d fail); marginal-only calibration (q̂ decile 10 FA 0.004, walltime decile 10 FA 0.123); Eagle extreme tail fails, no generality claim | Decision by Mahesh after Phase 2 review |
