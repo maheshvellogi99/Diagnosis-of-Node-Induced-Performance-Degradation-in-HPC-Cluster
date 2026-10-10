@@ -50,14 +50,14 @@ gate4a:
   null_kind: null
   n_null_random: 200                      # D37
   se_mult: 2                              # alpha + 2 SE (D44, D54)
-  guard_order: [a, b, none]               # D53
+  guard_order: [a, none]                  # D65 (guard b removed: degenerate, reported)
 
 pilot:                                    # D48
   null_bases: 20
   node: {kind: node, base: random, K_pct: 1, s: 1.3, seeds: 5}
 
 shift_bets:                               # D61
-  s0: [1.2, 1.3, 1.5, 2.0]
+  s0: [1.2, 1.3, 1.5, 2.0, 3.0]          # D66: 3.0 added after development seeds (disclosed)
   bins: 20
 
 d62:                                      # D62 detectability floor (reported, not a gate)
@@ -69,3 +69,8 @@ pilot2:                                   # second pilot (D59-D64); seeds 0-4 ar
   K_pct: 1
   s: [1.3, 1.5, 2.0]
   seeds: [0, 1, 2, 3, 4]
+
+full:                                     # full grid (D58 allocation adapted to the D60/D61 primary)
+  dev_seeds: [0, 1, 2, 3, 4]              # D64
+  gate4b: {kind: node, base: random, K_pct: 1, s: 1.3}
+  km_max_days: 120
