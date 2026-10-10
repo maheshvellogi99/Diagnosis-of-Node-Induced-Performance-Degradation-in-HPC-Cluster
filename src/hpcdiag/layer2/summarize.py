@@ -95,9 +95,14 @@ def timing(res: list[dict]) -> dict:
         ]
     )
     l1d = pd.DataFrame(l1)
-    primary_vars = ["jumper_none", "jumper_a", "jumper_b"]
+    primary_vars = [
+        v
+        for v in ("jumper_none", "jumper_a", "jumper_b", "lr_Sc_none", "lr_Sc_a", "lr_Sc_b")
+        if v in var.columns
+    ]
+    l1_cols = [c for c in ("population", "modeP7", "modeP7_guard_a", "centred") if c in l1d]
     t_primary = (
-        l1d[["population", "modeP7", "modeP7_guard_a"]].sum(axis=1).median()
+        l1d[l1_cols].sum(axis=1).median()
         + np.median([r["timing_s"]["pairs"] for r in res])
         + var[primary_vars].sum(axis=1).median()
         + np.median([r["timing_s"]["baselines"] for r in res])
