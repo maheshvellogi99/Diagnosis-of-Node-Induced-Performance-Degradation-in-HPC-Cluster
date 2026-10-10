@@ -169,3 +169,21 @@ def test_random_placement():
     assert (a.groupby("row_id")["node_id"].nunique() == a.groupby("row_id").size()).all()
     m = a.merge(jobs, on="row_id")
     assert m.apply(lambda r: r["node_id"] in pool[r["partition"]], axis=1).all()
+
+
+def test_heavy_decoy_draw_top_users():
+    from hpcdiag.inject.scenarios import heavy_decoy_draw
+    rng = np.random.default_rng(0)
+    n = 2000
+    probs = np.r_[np.full(5, .1), np.full(25, .02)]
+    users = rng.choice([f"u{i:02d}" for i in range(30)], n, p=probs)
+    start = T0 + pd.to_timedelta(rng.integers(0, 100 * 3600, n), unit="s")
+    jobs = pd.DataFrame({"user": users, "start_time": start})
+    main = np.ones(n, bool)
+    w = Window(T0, T0 + 10 * H)
+    for seed in range(20):
+        t0, user, rank, n_user, _ = heavy_decoy_draw(np.random.default_rng(seed), jobs, main, w,
+                                                     3, 10)
+        counts = jobs.loc[jobs["start_time"] >= t0, "user"].value_counts()
+        top3 = counts.sort_values(ascending=False).iloc[:3]
+        assert n_user == counts[user] and n_user >= top3.min() and 1 <= rank <= 3

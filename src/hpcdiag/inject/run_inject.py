@@ -24,14 +24,19 @@ from hpcdiag.inject.verify import check_changes
 from hpcdiag.utils.checksums import verify
 from hpcdiag.utils.run import Run, resolve, run_guarded, start_run
 
-KIND_CODE = {"node": 1, "node_partial": 1, "user_decoy": 2, "system_shock": 3}  # paired draws
+KIND_CODE = {"node": 1, "node_partial": 1, "user_decoy": 2, "system_shock": 3,
+             "user_decoy_heavy": 4}  # paired draws across s (and across node kinds)
+ADD_MODES = ("heavy_decoy", "null_bases")   # D36, D37: new scenarios only; existing untouched
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
+    ap.add_argument("--add", choices=ADD_MODES, default=None,
+                    help="add new scenarios to an existing scenario directory")
     a = ap.parse_args()
-    return run_guarded(start_run("phase3", a.config, tag="inject"), _run)
+    tag = "inject" if a.add is None else f"inject-add-{a.add}"
+    return run_guarded(start_run("phase3", a.config, tag=tag), lambda r: _run(r, a.add))
 
 
 def _rng(root: int, base_code: int, kind: str, k_pct: int, seed: int) -> np.random.Generator:
@@ -47,7 +52,7 @@ def _per_node_counts(jobs: pd.DataFrame, jn: pd.DataFrame, eligible: np.ndarray)
             "median": float(x.median()), "p90": float(x.quantile(0.9)), "max": int(x.max())}
 
 
-def _run(run: Run) -> int:
+def _run(run: Run, add: str | None = None) -> int:
     cfg, log = run.config, run.log
     problems = verify(resolve(cfg["raw_dir"]), resolve(cfg["checksums_file"]))
     if problems:
@@ -72,20 +77,42 @@ def _run(run: Run) -> int:
     log.info("freeze %s; onset window [%s, %s]; trace end %s; %d gaps", freeze, window.start,
              window.end, trace_end, len(gaps))
     out_root = resolve(d["out_dir"])
-    if out_root.exists() and any(out_root.iterdir()):
+    if add is None and out_root.exists() and any(out_root.iterdir()):
         raise RuntimeError(f"{out_root} is not empty; refusing to overwrite (ask first)")
+    if add is not None and not (out_root / "index.parquet").exists():
+        raise RuntimeError("--add needs an existing scenario directory with index.parquet")
 
-    # ---- bases (D29, D35)
+    def base_path(k: int):
+        return out_root / "_bases" / f"random_{k:02d}" / "job_nodes.parquet"
+
+    def rel(p) -> str:
+        return str(p.relative_to(resolve("."))) if p.is_relative_to(resolve(".")) else str(p)
+
+    # ---- bases (D29, D35; D37 for the extra null bases)
     bases: list[tuple[str, int, pd.DataFrame, str, list[int]]] = []
-    bases.append(("real", 1000, jn_real, d["job_nodes"], list(range(cfg["seeds"]))))
-    for k in range(cfg["bases"]["random_seeds"]):
-        jn = random_placement(jn_real, jobs, seed=k)
-        p = out_root / "_bases" / f"random_{k:02d}" / "job_nodes.parquet"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        jn.to_parquet(p, index=False)
-        rel = str(p.relative_to(resolve("."))) if p.is_relative_to(resolve(".")) else str(p)
-        bases.append((f"rand{k:02d}", k, jn, rel, [k]))
-    log.info("bases written: real + %d random", cfg["bases"]["random_seeds"])
+    if add != "null_bases":
+        bases.append(("real", 1000, jn_real, d["job_nodes"], list(range(cfg["seeds"]))))
+    if add is None:
+        rand_ids = range(cfg["bases"]["random_seeds"])
+    elif add == "heavy_decoy":
+        rand_ids = range(cfg["bases"]["random_seeds"])           # existing bases, read back
+    else:
+        lo, hi = cfg["bases"]["extra_null_random_seeds"]
+        rand_ids = range(lo, hi)
+    for k in rand_ids:
+        p = base_path(k)
+        if add == "heavy_decoy":
+            jn = pd.read_parquet(p)
+            if not jn.equals(random_placement(jn_real, jobs, seed=k)):
+                raise AssertionError(f"stored base {k} differs from its seed")
+        else:
+            if p.exists():
+                raise RuntimeError(f"{p} exists; refusing to overwrite")
+            jn = random_placement(jn_real, jobs, seed=k)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            jn.to_parquet(p, index=False)
+        bases.append((f"rand{k:02d}", k, jn, rel(p), [k]))
+    log.info("bases ready: %s", [b[0] for b in bases][:5] + ["..."])
 
     counts_per_node = {b[0]: _per_node_counts(jobs, b[2], eligible) for b in bases}
     rows = []
@@ -93,15 +120,22 @@ def _run(run: Run) -> int:
     for bname, bcode, jn, jn_path, seeds in bases:
         ends = jobs.loc[eligible & (jobs["end_time"] >= window.start).to_numpy(), "row_id"]
         active = np.sort(jn.loc[jn["row_id"].isin(ends), "node_id"].unique())
-        scen_list: list[tuple] = [("null", None, None, None)]          # D35: one null per base
-        for seed in seeds:
-            for kind in ("node", "node_partial"):
-                for kp in cfg["kinds"][kind]["k_pct"]:
+        scen_list: list[tuple] = []
+        if add in (None, "null_bases"):
+            scen_list.append(("null", None, None, None))                # D35: one null per base
+        if add is None:
+            for seed in seeds:
+                for kind in ("node", "node_partial"):
+                    for kp in cfg["kinds"][kind]["k_pct"]:
+                        for s in cfg["kinds"][kind]["s"]:
+                            scen_list.append((kind, kp, s, seed))
+                for kind in ("user_decoy", "system_shock"):
                     for s in cfg["kinds"][kind]["s"]:
-                        scen_list.append((kind, kp, s, seed))
-            for kind in ("user_decoy", "system_shock"):
-                for s in cfg["kinds"][kind]["s"]:
-                    scen_list.append((kind, None, s, seed))
+                        scen_list.append((kind, None, s, seed))
+        if add == "heavy_decoy":
+            for seed in seeds:
+                for s in cfg["kinds"]["user_decoy_heavy"]["s"]:
+                    scen_list.append(("user_decoy_heavy", None, s, seed))
         for kind, kp, s, seed in scen_list:
             info: dict = {"kind": kind, "base": bname,
                           "base_seed": None if bname == "real" else bcode,
@@ -126,6 +160,16 @@ def _run(run: Run) -> int:
                                              oc["max_redraws"])
                 ch, truth = S.decoy_scenario(jobs, eligible, t0, user, s, trace_end, sid)
                 info.update({"t0": t0, "user": user, "t0_redraws": red})
+            elif kind == "user_decoy_heavy":
+                sid = f"{kind}__{bname}__s{s}__seed{seed:02d}"
+                rng = _rng(cfg["seed"], bcode, kind, 0, seed)
+                t0, user, rank, n_user, red = S.heavy_decoy_draw(
+                    rng, jobs, main_pop, window, cfg["kinds"][kind]["top_users"],
+                    oc["max_redraws"])
+                ch, truth = S.decoy_scenario(jobs, eligible, t0, user, s, trace_end, sid,
+                                             kind="user_decoy_heavy")
+                info.update({"t0": t0, "user": user, "user_rank_after_t0": rank,
+                             "user_main_jobs_after_t0": n_user, "t0_redraws": red})
             else:
                 sid = f"{kind}__{bname}__s{s}__seed{seed:02d}"
                 rng = _rng(cfg["seed"], bcode, kind, 0, seed)
@@ -155,6 +199,8 @@ def _run(run: Run) -> int:
                    "mean_factor_applied": float(ch["factor_applied"].mean()) if len(ch) else np.nan,
                    "main_population_size_after": int((out["state_raw"].isin(cfg["eligible_states"])
                                                       & (out["run_time_s"] > 30)).sum())}
+            if (out_root / sid).exists():
+                raise RuntimeError(f"scenario {sid} exists; refusing to overwrite")
             write_scenario(out_root / sid, ch, truth, {**info, **{k: v for k, v in row.items()
                                                                   if k.startswith("n_")}})
             rows.append(row)
@@ -162,10 +208,17 @@ def _run(run: Run) -> int:
                  time.time() - t_start)
 
     idx = pd.DataFrame(rows)
-    idx.to_parquet(out_root / "index.parquet", index=False)
     idx.to_csv(run.dir / "scenario_counts.csv", index=False)
+    if add is None:
+        idx.to_parquet(out_root / "index.parquet", index=False)
+    else:                                   # append to the index; existing rows unchanged
+        old = pd.read_parquet(out_root / "index.parquet")
+        if set(old["scenario_id"]) & set(idx["scenario_id"]):
+            raise RuntimeError("scenario ids already in the index")
+        pd.concat([old, idx], ignore_index=True).to_parquet(out_root / "index.parquet",
+                                                            index=False)
     grid = idx.groupby(["kind", idx["base"].where(idx["base"] == "real", "random")]).size()
-    m = {"n_scenarios": int(len(idx)), "freeze_time": str(freeze),
+    m = {"add_mode": add, "n_scenarios": int(len(idx)), "freeze_time": str(freeze),
          "onset_window": [str(window.start), str(window.end)], "trace_end": str(trace_end),
          "gaps": [[str(a), str(b)] for a, b in gaps],
          "grid": {f"{k}|{b}": int(v) for (k, b), v in grid.items()},

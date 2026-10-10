@@ -147,8 +147,26 @@ def decoy_draw(rng: np.random.Generator, jobs: pd.DataFrame, main_pop: np.ndarra
     raise RuntimeError("no decoy user qualifies")
 
 
+def heavy_decoy_draw(rng: np.random.Generator, jobs: pd.DataFrame, main_pop: np.ndarray,
+                     window: Window, top_n: int,
+                     max_redraws: int) -> tuple[pd.Timestamp, str, int, int, int]:
+    """D36: t0 from the window, then a user drawn uniformly from the top_n users by number of
+    main-population jobs starting at/after t0 (ties broken by user id). Returns
+    (t0, user, rank 1..top_n, that user's main-population jobs after t0, gap redraws)."""
+    mp = jobs.loc[main_pop, ["user", "start_time"]]
+    t0, red = window.draw(rng, max_redraws)
+    counts = mp.loc[mp["start_time"] >= t0, "user"].astype(str).value_counts()
+    top = (counts.rename("n").reset_index().rename(columns={"index": "user"})
+           .sort_values(["n", "user"], ascending=[False, True]).head(top_n))
+    if top.empty:
+        raise RuntimeError("no main-population jobs after t0")
+    i = int(rng.integers(len(top)))
+    return t0, str(top["user"].iloc[i]), i + 1, int(top["n"].iloc[i]), red
+
+
 def decoy_scenario(jobs: pd.DataFrame, eligible: np.ndarray, t0: pd.Timestamp, user: str, s: float,
-                   trace_end: pd.Timestamp, scenario_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+                   trace_end: pd.Timestamp, scenario_id: str,
+                   kind: str = "user_decoy") -> tuple[pd.DataFrame, pd.DataFrame]:
     m = (eligible & (jobs["user"].astype(str).to_numpy() == user)
          & (jobs["start_time"] >= t0).to_numpy())
     rows = jobs.loc[m, "row_id"].to_numpy()
@@ -156,7 +174,7 @@ def decoy_scenario(jobs: pd.DataFrame, eligible: np.ndarray, t0: pd.Timestamp, u
     truth = pd.DataFrame({"node_id": pd.array([None], dtype="Int64"),
                           "onset_time": pd.to_datetime([t0]).astype("datetime64[us]"),
                           "end_time": pd.to_datetime([trace_end]).astype("datetime64[us]"),
-                          "factor": [float(s)], "kind": ["user_decoy"],
+                          "factor": [float(s)], "kind": [kind],
                           "cause": pd.array([None], dtype="str"), "user": [user],
                           "scenario_id": [scenario_id]})[TRUTH_COLUMNS]
     return changes, truth
