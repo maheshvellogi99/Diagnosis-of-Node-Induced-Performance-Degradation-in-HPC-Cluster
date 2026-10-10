@@ -26,7 +26,7 @@ from hpcdiag.utils.run import Run, resolve, run_guarded, start_run
 
 KIND_CODE = {"node": 1, "node_partial": 1, "user_decoy": 2, "system_shock": 3,
              "user_decoy_heavy": 4}  # paired draws across s (and across node kinds)
-ADD_MODES = ("heavy_decoy", "null_bases")   # D36, D37: new scenarios only; existing untouched
+ADD_MODES = ("heavy_decoy", "null_bases", "node_s_extra")  # D36, D37, D63: new ones only
 
 
 def main() -> int:
@@ -94,14 +94,14 @@ def _run(run: Run, add: str | None = None) -> int:
         bases.append(("real", 1000, jn_real, d["job_nodes"], list(range(cfg["seeds"]))))
     if add is None:
         rand_ids = range(cfg["bases"]["random_seeds"])
-    elif add == "heavy_decoy":
+    elif add in ("heavy_decoy", "node_s_extra"):
         rand_ids = range(cfg["bases"]["random_seeds"])           # existing bases, read back
     else:
         lo, hi = cfg["bases"]["extra_null_random_seeds"]
         rand_ids = range(lo, hi)
     for k in rand_ids:
         p = base_path(k)
-        if add == "heavy_decoy":
+        if add in ("heavy_decoy", "node_s_extra"):
             jn = pd.read_parquet(p)
             if not jn.equals(random_placement(jn_real, jobs, seed=k)):
                 raise AssertionError(f"stored base {k} differs from its seed")
@@ -136,6 +136,11 @@ def _run(run: Run, add: str | None = None) -> int:
             for seed in seeds:
                 for s in cfg["kinds"]["user_decoy_heavy"]["s"]:
                     scen_list.append(("user_decoy_heavy", None, s, seed))
+        if add == "node_s_extra":                    # D63: same keyed draws -> same nodes/onsets
+            for seed in seeds:
+                for kp in cfg["kinds"]["node"]["k_pct"]:
+                    for s in cfg["kinds"]["node"]["s_extra"]:
+                        scen_list.append(("node", kp, s, seed))
         for kind, kp, s, seed in scen_list:
             info: dict = {"kind": kind, "base": bname,
                           "base_seed": None if bname == "real" else bcode,
