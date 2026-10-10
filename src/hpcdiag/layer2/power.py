@@ -49,3 +49,52 @@ def gate2_l2_for(p: np.ndarray, phase2_cfg: dict) -> dict:
     m = _basic(p, phase2_cfg, TailCache(phase2_cfg))
     m["gate2_l2"] = gate2_l2(m, phase2_cfg)
     return m
+
+
+def detectability(
+    pop: pd.DataFrame, placement: pd.DataFrame, cfg: dict, bets: dict, mode_p_on
+) -> list[dict]:
+    """D62: expected log-growth per job-node pair under a shift alternative, and implied days to
+    reach log(m / alpha) at the median node's pair rate. For each s, every job's p-value is
+    recomputed with its score shifted by log(s) against the unshifted reference (as if only that
+    job were slowed). Rates: kappa mixture = max_kappa E log(1 + w (f_kappa(p) - 1)) (a mixture of
+    products grows at its best component's rate); LR jumper = max_s0 E log(1 + w (g_s0(p) - 1))
+    (jumper switching costs ignored); oracle = same with g = histogram of the true alternative."""
+    from hpcdiag.layer2.bets import hist_bet
+    from hpcdiag.stats.calibrators import power_calibrator
+
+    l1, lc, dc = cfg["layer1"], cfg["layer2"], cfg["d62"]
+    x = pop[["row_id", "end_ns"]].reset_index(names="k").merge(placement, on="row_id")
+    w = 1.0 / x["n_nodes"].to_numpy(float)
+    k = x["k"].to_numpy()
+    span_days = (pop["end_ns"].max() - pop["end_ns"].min()) / (24 * 3600 * 1e9)
+    rate_node = float(x.groupby("node_id").size().median() / span_days)
+    target = float(np.log(lc["m_fixed"] / lc["alpha"]))
+    out = []
+    for lab, col in (("S", "score"), ("Sc", "score_c")):
+        for s in dc["s"]:
+            p = mode_p_on(pop, col, l1["window_hours"], l1["min_ref"], query_shift=float(np.log(s)))
+            pp = p[k]
+            ok = np.isfinite(pp)
+            pp, ww = pp[ok], w[ok]
+            kap = max(
+                float(np.mean(np.log1p(ww * (power_calibrator(pp, kk) - 1.0))))
+                for kk in lc["kappas"]
+            )
+            lr = max(float(np.mean(np.log1p(ww * (g(pp) - 1.0)))) for g in bets[lab])
+            orc_g = hist_bet(p, cfg["shift_bets"]["bins"], "oracle")
+            with np.errstate(divide="ignore"):
+                orc = float(np.mean(np.log1p(ww * (orc_g(pp) - 1.0))))
+            row = {
+                "score": lab,
+                "s": s,
+                "n_pairs": int(ok.sum()),
+                "pairs_per_day_median_node": rate_node,
+                "target_log": target,
+                "median_p_alt": float(np.median(p[np.isfinite(p)])),
+            }
+            for name, r in (("kappa", kap), ("lr_jumper", lr), ("oracle", orc)):
+                row[f"rate_{name}"] = r
+                row[f"days_{name}"] = target / (r * rate_node) if r > 0 else float("inf")
+            out.append(row)
+    return out

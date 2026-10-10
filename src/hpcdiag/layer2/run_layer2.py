@@ -37,7 +37,7 @@ G: dict = {}  # per-process globals (filled by _init)
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--mode", choices=["pilot"], required=True)
+    ap.add_argument("--mode", choices=["pilot", "pilot2"], required=True)
     ap.add_argument("--workers", type=int, default=7)
     a = ap.parse_args()
     run = start_run("phase4", a.config, tag=a.mode)
@@ -68,6 +68,34 @@ def _init(config_path: str) -> None:
         null_cache={},
         decoy_cache={},
     )
+    G["bets"] = _build_bets() if "shift_bets" in cfg else {}
+
+
+def _null_pop() -> pd.DataFrame:
+    """Population of the unmodified trace with centred scores (shared by every null)."""
+    l1 = G["cfg"]["layer1"]
+    pop = P.scenario_population(G["jobs"], G["fr"], G["theta"], G["cfg"])
+    return P.add_centred(pop, l1["centre_window_hours"], l1["centre_min_n"])
+
+
+def _build_bets() -> dict:
+    """D61: shift-LR histogram bets from the warm-up week [freeze, freeze + 7 d] of the
+    unmodified trace (identical in every scenario: no injected job ends before freeze + 7 d)."""
+    from hpcdiag.layer2.bets import build_shift_bets
+
+    l1, sb = G["cfg"]["layer1"], G["cfg"]["shift_bets"]
+    pop = _null_pop()
+    fz = G["fr"].freeze.value
+    kw = dict(
+        window_h=l1["window_hours"], min_ref=l1["min_ref"], bins=sb["bins"], mode_p_on=P.mode_p_on
+    )
+    return {
+        "S": build_shift_bets(pop, "score", fz, sb["s0"], **kw),
+        "Sc": build_shift_bets(pop, "score_c", fz, sb["s0"], **kw),
+        "Sc_a": build_shift_bets(
+            pop, "score_c", fz, sb["s0"], detrend_hours=l1["guard_a_hours"], **kw
+        ),
+    }
 
 
 def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dict, dict]:
@@ -83,6 +111,14 @@ def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dic
     t0 = time.time()
     ps["P7_a"] = P.mode_p(pop, l1["window_hours"], l1["min_ref"], l1["guard_a_hours"])
     t["modeP7_guard_a"] = time.time() - t0
+    if variant_set == "pilot2":
+        t0 = time.time()
+        pop = P.add_centred(pop, l1["centre_window_hours"], l1["centre_min_n"])
+        ps["Sc"] = P.mode_p_on(pop, "score_c", l1["window_hours"], l1["min_ref"])
+        ps["Sc_a"] = P.mode_p_on(
+            pop, "score_c", l1["window_hours"], l1["min_ref"], l1["guard_a_hours"]
+        )
+        t["centred"] = time.time() - t0
     if variant_set == "ablation":
         t0 = time.time()
         for w in l1["sensitivity_windows_hours"]:
@@ -92,20 +128,29 @@ def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dic
     return pop, ps, t
 
 
-def _variants(variant_set: str) -> list[tuple[str, str, str, float | None, bool]]:
-    """(name, p key, guard, J, decoy weight)."""
+def _variants(variant_set: str) -> list[tuple[str, str, str, float | None, bool, str]]:
+    """(name, p key, guard, J, decoy weight, bet: 'kappa' or a key of G['bets'])."""
     J = G["cfg"]["layer2"]["jumper_J"]
+    if variant_set == "pilot2":  # D60/D61 primary + ablations
+        return [
+            ("lr_Sc_none", "Sc", "none", J, False, "Sc"),
+            ("lr_Sc_a", "Sc_a", "a", J, False, "Sc_a"),
+            ("lr_Sc_b", "Sc", "b", J, False, "Sc"),
+            ("kappa_Sc_none", "Sc", "none", J, False, "kappa"),
+            ("lr_S_none", "P7", "none", J, False, "S"),
+            ("kappa_S_none", "P7", "none", J, False, "kappa"),
+        ]
     out = []
     for g in ("none", "a", "b"):
         pk = "P7_a" if g == "a" else "P7"
-        out.append((f"jumper_{g}", pk, g, J, False))
+        out.append((f"jumper_{g}", pk, g, J, False, "kappa"))
         if variant_set == "ablation":
-            out.append((f"plain_{g}", pk, g, None, False))
-            out.append((f"jumper_decoyw_{g}", pk, g, J, True))
+            out.append((f"plain_{g}", pk, g, None, False, "kappa"))
+            out.append((f"jumper_decoyw_{g}", pk, g, J, True, "kappa"))
     if variant_set == "ablation":
         for w in G["cfg"]["layer1"]["sensitivity_windows_hours"]:
-            out.append((f"jumper_none_P{w}h", f"P{w}h", "none", J, False))
-        out.append(("jumper_none_modeE", "E", "none", J, False))
+            out.append((f"jumper_none_P{w}h", f"P{w}h", "none", J, False, "kappa"))
+        out.append(("jumper_none_modeE", "E", "none", J, False, "kappa"))
     return out
 
 
@@ -177,7 +222,7 @@ def _process(task: tuple[str, str]) -> dict:
         )
         coalloc = set(aff_pairs["node_id"].tolist()) - deg
     T["variants"] = {}
-    for name, pkey, guard, J, dw in _variants(vset):
+    for name, pkey, guard, J, dw, bet in _variants(vset):
         t0 = time.time()
         p = ps[pkey]
         fz = None
@@ -186,7 +231,8 @@ def _process(task: tuple[str, str]) -> dict:
                 gb = lc["guard_b"]
                 frozen[pkey] = A.guard_b_frozen(p, end_ns, gb["J"], gb["ratio"])
             fz = frozen[pkey]
-        ev = A.node_evidence(pairs, p, w_decoy if dw else w_base, lc["kappas"], J, fz)
+        bets = lc["kappas"] if bet == "kappa" else G["bets"][bet]
+        ev = A.node_evidence(pairs, p, w_decoy if dw else w_base, bets, J, fz)
         snap = A.snapshots(ev, eval_ns, m)
         out = _evaluate(
             snap,
@@ -201,14 +247,15 @@ def _process(task: tuple[str, str]) -> dict:
             out["frozen_share"] = float(fz.mean())
         res["variants"][name] = out
         T["variants"][name] = time.time() - t0
-    # baselines (unguarded Mode P W = 7 d)
+    # baselines (unguarded Mode P W = 7 d; on S_c with the LR primary in pilot2)
     t0 = time.time()
-    p = ps["P7"]
+    p = ps["Sc"] if vset == "pilot2" else ps["P7"]
+    b5_bets = G["bets"]["Sc"] if vset == "pilot2" else lc["kappas"]
     cs = SEL.cumulative_node_stats(pairs, p, lc["kappas"])
     fis = A.snapshots(cs, eval_ns, m, "fis", 0.0)
     cnt = A.snapshots(cs, eval_ns, m, "cnt", 0.0)
     sf = A.snapshots(cs, eval_ns, m, "f", 0.0)
-    ev_primary = A.node_evidence(pairs, p, w_base, lc["kappas"], lc["jumper_J"])
+    ev_primary = A.node_evidence(pairs, p, w_base, b5_bets, lc["jumper_J"])
     lm = A.snapshots(ev_primary, eval_ns, m)
     rel = (pop["run_time_s"].to_numpy() - np.maximum(pop["that"].to_numpy(), 1.0)) / np.maximum(
         pop["that"].to_numpy(), 1.0
@@ -291,6 +338,63 @@ def _tasks_pilot(cfg: dict) -> list[tuple[str, str]]:
     return t
 
 
+def _tasks_pilot2(cfg: dict) -> list[tuple[str, str]]:
+    pc = cfg["pilot2"]
+    t = [(f"null__rand{k:02d}", "pilot2") for k in range(pc["null_bases"])]
+    t += [
+        (f"node__rand{k:02d}__K{pc['K_pct']}__s{s}__seed{k:02d}", "pilot2")
+        for s in pc["s"]
+        for k in pc["seeds"]
+    ]
+    return t
+
+
+def _pilot2_diagnostics(cfg: dict, log) -> dict:
+    """D59 paired check (raw S and S_c) and D62 detectability table, in the main process."""
+    from hpcdiag.layer2.power import detectability, paired_check
+
+    l1, pc = cfg["layer1"], cfg["pilot2"]
+    null = _null_pop()
+    pn = {
+        "S": pd.Series(
+            P.mode_p_on(null, "score", l1["window_hours"], l1["min_ref"]), index=null["row_id"]
+        ),
+        "Sc": pd.Series(
+            P.mode_p_on(null, "score_c", l1["window_hours"], l1["min_ref"]), index=null["row_id"]
+        ),
+    }
+    d59 = []
+    for s in pc["s"]:
+        for k in pc["seeds"]:
+            sid = f"node__rand{k:02d}__K{pc['K_pct']}__s{s}__seed{k:02d}"
+            _, ch, _, jm = _scenario_inputs(sid)
+            pop = P.add_centred(
+                P.scenario_population(jm, G["fr"], G["theta"], cfg),
+                l1["centre_window_hours"],
+                l1["centre_min_n"],
+            )
+            for lab, col in (("S", "score"), ("Sc", "score_c")):
+                ps = pd.Series(
+                    P.mode_p_on(pop, col, l1["window_hours"], l1["min_ref"]), index=pop["row_id"]
+                )
+                r = paired_check(ps, pn[lab], ch["row_id"].to_numpy())
+                d59.append({"scenario_id": sid, "s": s, "seed": k, "score": lab, **r})
+    log.info("D59 done")
+    pl = P.load_placement(cfg["d62"]["placement"])
+    d62 = detectability(null, pl, cfg, G["bets"], P.mode_p_on)
+    log.info("D62 done")
+    centre_share = null["centre_level"].value_counts(normalize=True).sort_index()
+    return {
+        "d59": d59,
+        "d62": d62,
+        "centre_level_share": {int(k): float(v) for k, v in centre_share.items()},
+        "bets": {
+            k: [{"label": b.label, "n": b.n, "density": b.density.tolist()} for b in v]
+            for k, v in G["bets"].items()
+        },
+    }
+
+
 def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
     cfg, log = run.config, run.log
     problems = verify(resolve(cfg["raw_dir"]), resolve(cfg["checksums_file"]))
@@ -299,7 +403,8 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
     t0 = time.time()
     _init(config_path)  # builds/validates the frozen cache
     log.info("frozen predictions: %s (%.0fs)", G["fr"].check, time.time() - t0)
-    tasks = _tasks_pilot(cfg)
+    tasks = _tasks_pilot(cfg) if mode == "pilot" else _tasks_pilot2(cfg)
+    diag = _pilot2_diagnostics(cfg, log) if mode == "pilot2" else None
     log.info("%d tasks, %d workers", len(tasks), workers)
     out_path = run.dir / "results.jsonl"
     t0 = time.time()
@@ -326,6 +431,8 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
         "m_fixed": cfg["layer2"]["m_fixed"],
         "frozen_check": G["fr"].check,
     }
+    if diag is not None:
+        summ.update(diag)
     run.write_json("metrics.json", summ)
     run.finish("ok", {"n_tasks": len(tasks), "wall_s": round(wall, 1)})
     return 0
