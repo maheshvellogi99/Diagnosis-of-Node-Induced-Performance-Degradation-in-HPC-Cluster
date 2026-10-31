@@ -492,23 +492,24 @@ n ∈ N_j:
 - Validity condition [A, tested in Gate 4a]: under "node n is healthy", the p-values of jobs on n
   are sequentially valid, E[f(p_j) | past] ≤ 1. This holds if p-values are uniform given the past
   (Mode E) and node placement does not depend on lateness.
-- **Honest validity statement (D72).** The per-node null "p-values of jobs on n are super-uniform
-  given the past" is violated for a healthy node that shares jobs with a degraded node (straggler
-  contamination: the shared job is late because of the other node). The guarantee is exact under the
-  global null (no degraded node) given the validity condition above; with degraded nodes present,
-  FDR is controlled empirically, not proved. Measured as co-allocated false flags (§10, D71).
-- **Predictable blame allocation, "explaining away" (D71, Phase 4b design v2).** v2 replaces the
-  weight w_j = 1/|N_j| by
-
-    λ_{j,n} = M_n⁻ / Σ_{k ∈ N_j} M_k⁻,
-
-  where M_k⁻ is node k's total jumper capital just before job j is processed (D14 order; all jobs
-  with the same end time use the state before that tie block). λ_{j,n} ∈ (0, 1], and each job's λ
-  sum to 1 over N_j. It reduces to 1/|N_j| when all M are equal; a single-node job has λ = 1. No new
-  parameter. λ uses only jobs that ended before j, so it is predictable and each node's e-process
-  stays valid (F16). It is not known at job start, unlike w_j: the "past" in the validity condition
-  must be the past of ALL nodes up to j, which is the filtration of the proof in 4.3. v1 (w_j) stays
-  the Phase 4 result; v1 and v2 are compared on fresh seeds (D70, D74).
+- **Honest validity statement (D72, D76).** The guarantee rests on p-values that are valid given
+  the past. Two violations are known:
+  (1) Straggler contamination (D72): the per-node null "p-values of jobs on n are super-uniform given
+  the past" is violated for a healthy node that shares jobs with a degraded node, because the shared
+  job is late on account of the other node. With degraded nodes present, FDR is controlled
+  empirically, not proved.
+  (2) Temporal clustering (D76, a result of Phase 4b): real Mode P p-values are marginally but not
+  conditionally calibrated. Late jobs come in bursts (autocorrelation of 1{p < 0.1} = 0.29 at
+  lag 1), so even under the global null the condition E[f(p_j) | past] ≤ 1 fails on the real trace.
+  The bound of 4.3 therefore holds for p-values that meet the condition, not as a theorem about real
+  Mode P p-values: on the real trace Gate 4a is an empirical result. v1 passes Gate 4a partly because
+  w_j = 1/|N_j| dilutes bursts. See reports/phase_4b.md.
+- **Predictable blame allocation, "explaining away" (D71) — REJECTED (D75).** Tested as v2 in Phase
+  4b: replace w_j = 1/|N_j| by λ_{j,n} = M_n⁻ / Σ_{k ∈ N_j} M_k⁻, with M_k⁻ node k's total jumper
+  capital just before job j (D14 order; jobs with the same end time use the state before that tie
+  block). It is predictable, and valid on iid p-values (null P(ever) 0.035), but it raises null
+  P(ever) to 0.300 ± 0.032 on the real trace. v1 (lr_Sc_a, w_j = 1/|N_j|) remains the Layer-2
+  configuration. No λ caps, batching or other tuning of D71 (D75).
 - Work in log space: log M (avoid overflow).
 - Per-node job order (D14): jobs are applied to M_n in `end_time` order, ties broken by `row_id`.
   Same-node overlaps ≤ 60 s (Phase 0: max 19 s) are treated as non-overlapping. The PM100
@@ -535,10 +536,9 @@ applied to the e-values M_1(τ ∧ T), …, M_m(τ ∧ T) controls FDR ≤ α un
 P(e-BH at τ ∧ T rejects anything). If τ ≤ T, e-BH at τ rejects by definition; if τ = ∞, it rejects
 nothing at T. Hence P(τ ≤ T) = FDR(τ ∧ T) ≤ α. This holds for any dependence between nodes and any
 number of evaluation times, provided m is fixed (D50) and every update is predictable (guard (b)
-freezes are decided from jobs that ended before j, D51). The proof applies unchanged to λ_{j,n}
-(D71): τ was already defined on the filtration of all nodes, and each λ_{j,n} is measurable with
-respect to that filtration before p_j is seen, so each M_n is still an e-process under the global
-null. With degraded nodes present the contaminated healthy nodes break the premise (D72).
+freezes are decided from jobs that ended before j, D51). The premise "each M_n is an e-process"
+needs the validity condition of 4.1: straggler contamination (D72) and temporal clustering of real
+Mode P p-values (D76) both break it, so on real data the bound is checked empirically by Gate 4a.
 
 **4.4 Baselines.**
 - B1 guide heuristic: median relative residual > 20%, ≥ 10 jobs, ≥ 3 users, ≥ 3 distinct job
@@ -637,7 +637,8 @@ end, status, key metrics. Reports cite run ids.
 | Workload drift breaks exchangeability | Mode A, ACI, short calibration windows; report measured (not just theoretical) error rates |
 | System-wide slowdowns inflate all nodes | §4.2 guard; shock scenarios in Phase 3 |
 | Node placement correlated with lateness (e.g. certain users on certain racks) | Mondrian by user; check per-node p-value uniformity on clean data (Gate 4a) |
-| Straggler contamination: a healthy node sharing jobs with a degraded node sees late jobs, so its per-node null is violated (D72) | Guarantee stated as exact only under the global null; co-allocated false flags measured separately; D71 blame allocation measured against v1 |
+| Straggler contamination: a healthy node sharing jobs with a degraded node sees late jobs, so its per-node null is violated (D72) | Guarantee not claimed with degraded nodes present; co-allocated false flags measured separately. D71 blame allocation did not reduce them on the development pilot and is rejected (D75) |
+| Real Mode P p-values are marginally but not conditionally calibrated: temporal clustering (autocorrelation of 1{p < 0.1} = 0.29, 0.20, 0.06 at lags 1, 10, 100) breaks the condition behind the e-process guarantee, even under the global null (D76) | Gate 4a on the real p-value trace is the evidence, stated as empirical; v1 passes it partly because w_j = 1/|N_j| dilutes bursts, so designs that concentrate bets must be re-checked on real nulls (D71: 0.300 ± 0.032 vs 0.035 on iid p-values). Details in reports/phase_4b.md |
 | Injection model too simple (straggler assumption) | "partial" variant; Phase 6 real injections |
 | PM100 contains only exclusive jobs | state as limitation; shared-node jobs future work |
 | PM100 has no job name, so baseline B1 drops the "≥ 3 applications" condition (D13) | state as limitation; B1 on PM100 is weaker than the guide's rule as written |
@@ -775,3 +776,6 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D72 | 31 Oct 2026 | Honest validity statement in PLAN Phase 4.1: the per-node null is violated for a healthy node that shares jobs with a degraded node (straggler contamination). The guarantee is exact under the global null; with degraded nodes present, FDR is controlled empirically. Measure whether D71 reduces co-allocated false flags | Mahesh |
 | D73 | 31 Oct 2026 | Development pilot: seeds 0–4, K = 1%, s ∈ {1.3, 2.0, 3.0}, random base, plus the 20 original nulls. Compare v1 (lr_Sc_a) with v2 (lr_Sc_a + D71): KM median delay, share found within 14 d, recall at trace end, mean FDP, co-allocated false flags, mean λ on degraded nodes after onset, null P(ever). Show the numbers and STOP | Mahesh |
 | D74 | 31 Oct 2026 | Only after Mahesh's go: v1 and v2 on fresh seeds 20–39 and nulls 200–399, Gate 4a and Gate 4b definitions unchanged; reports/phase_4b.md | Mahesh |
+| D75 | 31 Oct 2026 | D71 (predictable blame allocation) is rejected. On the real trace it raises null P(ever) to 0.300 ± 0.032, while on iid p-values it is 0.035: Mode P p-values are marginally but not conditionally calibrated (bursts; lag-1 autocorrelation of 1{p < 0.1} = 0.29). v1 (lr_Sc_a) remains the Layer-2 configuration. No λ caps, batching or other tuning of D71 | Mahesh |
+| D76 | 31 Oct 2026 | Recorded as a result, not a footnote: (i) the per-node e-process guarantee needs p-values that are valid given the past, and real Mode P p-values violate this through temporal clustering; (ii) v1 passes Gate 4a empirically partly because w = 1/|N_j| dilutes bursts; (iii) report the diagnostic table (real / iid / shuffled / shuffled within job size) for v1 and v2, the autocorrelation of 1{p < 0.1} at lags 1, 10, 100, and the dates of the null flags. Added to PLAN Phase 4.1 and §12 | Mahesh |
+| D77 | 31 Oct 2026 | Fresh seeds 20–39 and nulls 200–399 stay sealed: nothing runs on them until the final system (Layer 2 v1 + Phase 5 active probing) is frozen. Replaces the D74 run. Disclosed: bases 20–39 were already used as null bases in Phase 4 | Mahesh |
