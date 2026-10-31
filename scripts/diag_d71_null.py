@@ -7,6 +7,7 @@ v1 and v2 on the same placements with the p-value stream replaced by:
   iid           iid U(0, 1) (same warm-up mask): P(ever) must respect alpha if code and proof hold
   perm          real p-values randomly permuted over jobs (no time order, no link to job size)
   perm_in_size  permuted within job-size class (no time order, link to job size kept)
+Versions: v1, v2, and on real and iid also v1 with w = 1 (no dilution, D76 ii).
 Also: mean bet value by job size, autocorrelation of p, and what drives each real-stream v2 flag.
 """
 
@@ -27,6 +28,13 @@ from hpcdiag.layer2 import select as SEL
 from hpcdiag.utils.run import Run, resolve, run_guarded, start_run
 
 STREAMS = ("real", "iid", "perm", "perm_in_size")
+# v1_w1: v1 with w = 1 instead of 1/|N_j| (no dilution): direct check of D76 (ii)
+VERSIONS = {
+    "real": ("v1", "v2", "v1_w1"),
+    "iid": ("v1", "v2", "v1_w1"),
+    "perm": ("v1", "v2"),
+    "perm_in_size": ("v1", "v2"),
+}
 BUCKETS = [(1, 1), (2, 2), (3, 4), (5, 16), (17, 10**6)]
 L: dict = {}
 
@@ -72,17 +80,16 @@ def task(k: int) -> dict:
     res = {"base": k}
     for name in STREAMS:
         p = stream(name, 10_000 + k)
-        for v in ("v1", "v2"):
-            ev = (
-                A.node_evidence(pairs, p, w, bets, J)
-                if v == "v1"
-                else A.node_evidence_blame(pairs, p, bets, J)
-            )
+        for v in VERSIONS[name]:
+            if v == "v2":
+                ev = A.node_evidence_blame(pairs, p, bets, J)
+            else:
+                ev = A.node_evidence(pairs, p, w if v == "v1" else np.ones(len(w)), bets, J)
             snap = A.snapshots(ev, eval_ns, m)
             fl = SEL.ebh_over_time(snap, lc["alpha"], m)
             res[f"{name}_{v}"] = bool(fl.any())
             res[f"{name}_{v}_maxlogM"] = float(snap.max())
-            if name == "real" and v == "v2" and fl.any():
+            if name == "real" and fl.any():
                 t = int(np.flatnonzero(fl.any(axis=1))[0])
                 n = int(np.flatnonzero(fl[t])[0])
                 e = ev[ev["node_id"] == n].reset_index(drop=True)
@@ -92,14 +99,21 @@ def task(k: int) -> dict:
                     (pairs["node_id"] == n) & np.isfinite(p[pairs["k"].to_numpy()]), "n_nodes"
                 ].to_numpy()
                 top = np.argsort(-gain[sel])[:20]
-                res["flag"] = {
-                    "node": n,
-                    "t_days": (eval_ns[t] - eval_ns[0]) / (24 * 3600 * 1e9),
-                    "n_updates": int(sel.sum()),
-                    "mean_lam": float(e["lam"][sel].mean()),
-                    "share_gain_top20": float(gain[sel][top].sum() / gain[sel].sum()),
-                    "median_size_top20": float(np.median(nn[: len(sel)][sel][top])),
-                }
+                res.setdefault("flags", []).append(
+                    {
+                        "version": v,
+                        "base": k,
+                        "date": str(pd.Timestamp(int(eval_ns[t]))),
+                        "nodes_at_first_flag": int(fl[t].sum()),
+                        "distinct_nodes_ever": int(fl.any(axis=0).sum()),
+                        "node": n,
+                        "t_days": (eval_ns[t] - eval_ns[0]) / (24 * 3600 * 1e9),
+                        "n_updates": int(sel.sum()),
+                        "mean_lam": float(e["lam"][sel].mean()) if v == "v2" else float("nan"),
+                        "share_gain_top20": float(gain[sel][top].sum() / gain[sel].sum()),
+                        "median_size_top20": float(np.median(nn[: len(sel)][sel][top])),
+                    }
+                )
     return res
 
 
@@ -136,11 +150,11 @@ def _run(run: Run, config_path: str, workers: int) -> int:
     ctx = mp.get_context("spawn")
     with ctx.Pool(workers, initializer=_init, initargs=(config_path,)) as pool:
         res = pool.map(task, range(200), chunksize=4)
-    d = pd.DataFrame([{k: v for k, v in r.items() if k != "flag"} for r in res])
+    d = pd.DataFrame([{k: v for k, v in r.items() if k != "flags"} for r in res])
     d.to_csv(run.dir / "diag.csv", index=False)
     rows = []
     for name in STREAMS:
-        for v in ("v1", "v2"):
+        for v in VERSIONS[name]:
             x = d[f"{name}_{v}"].to_numpy(float)
             y = x[:20]
             rows.append(
@@ -159,7 +173,7 @@ def _run(run: Run, config_path: str, workers: int) -> int:
     print(t.round(3).to_string(index=False))
     print(pd.DataFrame(tab["by_size"]).round(4).T.to_string(header=False))
     print("acf", tab["acf_p_lt_0.1"], "jobs", tab["n_jobs"])
-    fl = pd.DataFrame([r["flag"] for r in res if "flag" in r])
+    fl = pd.DataFrame([x for r in res for x in r.get("flags", [])])
     print(fl.round(3).to_string(index=False))
     run.write_json(
         "metrics.json",
