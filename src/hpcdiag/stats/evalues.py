@@ -108,3 +108,102 @@ def log_bet_funcs(p: np.ndarray, w: np.ndarray, funcs) -> np.ndarray:
         raise ValueError("weights must be in [0, 1]")
     with np.errstate(divide="ignore"):
         return np.column_stack([np.log1p(w * (g(p) - 1.0)) for g in funcs])
+
+
+def _lambda_from_log(lm: np.ndarray) -> np.ndarray:
+    """lambda = M / sum(M) for one job, from log M (D71)."""
+    r = np.exp(lm - lm.max())
+    return r / r.sum()
+
+
+def blame_reference(
+    job: np.ndarray, block: np.ndarray, node: np.ndarray, g: np.ndarray, J: float, m: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Jumper with blame allocation (D71), written out step by step (reference for tests).
+
+    Pairs (job, node) in processing order (D14); `block` = tie-block id (same end time). `g` (n, K)
+    = bet densities at the job's p-value, one column per betting state; state 0 'no bet' is added
+    here. All jobs of a block take lambda_{j,n} = M_n / sum_{k in N_j} M_k from the state BEFORE
+    the block; the updates are then applied in order. Returns (log M after each pair, lambda)."""
+    logC = jumper_init(m, g.shape[1] + 1)
+    out, lam = np.empty(len(node)), np.empty(len(node))
+    starts = np.r_[0, np.flatnonzero(np.diff(block)) + 1, len(block)]
+    for a, b in zip(starts[:-1], starts[1:], strict=True):
+        before = log_total(logC)
+        for j in np.unique(job[a:b]):
+            i = a + np.flatnonzero(job[a:b] == j)
+            lam[i] = _lambda_from_log(before[node[i]])
+        for i in range(a, b):
+            with np.errstate(divide="ignore"):
+                lb = np.log1p(lam[i] * (g[i] - 1.0))
+            n = node[i : i + 1]
+            logC[n] = jumper_step(logC[n], np.r_[0.0, lb][None, :], J)
+            out[i] = log_total(logC[n])[0]
+    return out, lam
+
+
+def _block_levels(block: np.ndarray, node: np.ndarray, m: int) -> tuple[np.ndarray, np.ndarray]:
+    """Schedule tie blocks: level(b) = 1 + the latest level of any of its nodes, so blocks on one
+    level share no node and can be updated together. Returns (level per pair, level has a node
+    twice inside one block)."""
+    starts = np.r_[0, np.flatnonzero(np.diff(block)) + 1, len(block)]
+    nodes = node.tolist()
+    last = [0] * m
+    lev, repeat = [], {}
+    for a, b in zip(starts[:-1].tolist(), starts[1:].tolist(), strict=True):
+        seg = nodes[a:b]
+        lv = 1 + max([last[x] for x in seg])
+        for x in seg:
+            last[x] = lv
+        lev.append(lv)
+        if len(set(seg)) < len(seg):
+            repeat[lv] = True
+    rep = np.zeros(max(lev) + 1, bool)
+    rep[list(repeat)] = True
+    return np.repeat(np.array(lev), np.diff(starts)), rep
+
+
+def blame_logM(
+    job: np.ndarray, block: np.ndarray, node: np.ndarray, g: np.ndarray, J: float, m: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Vectorised blame_reference (same arguments, same result; D71)."""
+    n = len(node)
+    out, lam = np.empty(n), np.empty(n)
+    if n == 0:
+        return out, lam
+    level, rep = _block_levels(block, node, m)
+    order = np.argsort(level, kind="stable")
+    cuts = np.r_[0, np.flatnonzero(np.diff(level[order])) + 1, n]
+    logC = jumper_init(m, g.shape[1] + 1)
+    total = np.zeros(m)
+    for a, b in zip(cuts[:-1].tolist(), cuts[1:].tolist(), strict=True):
+        idx = order[a:b]
+        nd, jb = node[idx], job[idx]
+        st = np.r_[0, np.flatnonzero(jb[1:] != jb[:-1]) + 1]
+        if len(st) == len(idx):
+            la = np.ones(len(idx))
+        else:
+            sizes = np.diff(np.r_[st, len(idx)])
+            lm = total[nd]
+            r = np.exp(lm - np.repeat(np.maximum.reduceat(lm, st), sizes))
+            la = r / np.repeat(np.add.reduceat(r, st), sizes)
+        lam[idx] = la
+        with np.errstate(divide="ignore"):
+            lg = np.log1p(la[:, None] * (g[idx] - 1.0))
+        lg = np.column_stack([np.zeros(len(idx)), lg])
+        if not rep[level[idx[0]]]:
+            logC[nd] = jumper_step(logC[nd], lg, J)
+            total[nd] = log_total(logC[nd])
+            out[idx] = total[nd]
+            continue
+        o = np.argsort(nd, kind="stable")  # a node twice in one block: apply its updates in order
+        first = np.r_[True, nd[o][1:] != nd[o][:-1]]
+        grp = np.cumsum(first) - 1
+        rank = np.empty(len(o), int)
+        rank[o] = np.arange(len(o)) - np.flatnonzero(first)[grp]
+        for r_i in range(int(rank.max()) + 1):
+            s = np.flatnonzero(rank == r_i)
+            logC[nd[s]] = jumper_step(logC[nd[s]], lg[s], J)
+            total[nd[s]] = log_total(logC[nd[s]])
+            out[idx[s]] = total[nd[s]]
+    return out, lam

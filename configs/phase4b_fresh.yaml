@@ -1,0 +1,8 @@
+# Phase 4b — fresh evaluation scenarios (D70). Every generation parameter comes from the Phase 3
+# config below, which is not edited; only the seed ranges are new.
+seed: 0                                  # same root as Phase 3 (scenario RNGs are keyed)
+phase3_config: configs/phase3_inject.yaml
+seeds: [20, 40]                          # scenario seeds 20..39; random base k for seed k, plus real
+null_bases: [200, 400]                   # D70: new null-only random bases 200..399
+kinds: [node, user_decoy, user_decoy_heavy, system_shock]   # node_partial not in D70
+index_file: index_fresh.parquet          # Phase 3 index.parquet is left as it is

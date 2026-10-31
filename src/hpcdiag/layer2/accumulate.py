@@ -8,7 +8,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from hpcdiag.stats.calibrators import power_calibrator
 from hpcdiag.stats.evalues import (
+    blame_logM,
     jumper_init,
     jumper_step,
     log_bet,
@@ -97,6 +99,33 @@ def node_evidence(
     node = pairs["node_id"].to_numpy()[use]
     lm = node_logM_by_rank(node, lb, J)
     return pd.DataFrame({"node_id": node, "end_ns": pairs["end_ns"].to_numpy()[use], "logM": lm})
+
+
+def node_evidence_blame(
+    pairs: pd.DataFrame,
+    p_job: np.ndarray,
+    bets,
+    J: float,
+    frozen_job: np.ndarray | None = None,
+) -> pd.DataFrame:
+    """D71: as node_evidence with w_j replaced by lambda_{j,n} = M_n / sum_{k in N_j} M_k, taken
+    from the state before the job's tie block. Same output plus the lambda of each update (`lam`).
+    Every pair of a job has the same p-value, so a job updates all of its nodes or none."""
+    pk = pairs["k"].to_numpy()
+    pj = p_job[pk]
+    use = np.isfinite(pj)
+    if frozen_job is not None:
+        use &= ~frozen_job[pk]
+    pu = pj[use]
+    node = pairs["node_id"].to_numpy()[use]
+    end = pairs["end_ns"].to_numpy()[use]
+    if len(bets) and callable(bets[0]):
+        g = np.column_stack([f(pu) for f in bets])
+    else:
+        g = np.column_stack([power_calibrator(pu, k) for k in bets])
+    m = int(pairs["node_id"].max()) + 1
+    lm, lam = blame_logM(pk[use], end, node, g, J, m)
+    return pd.DataFrame({"node_id": node, "end_ns": end, "logM": lm, "lam": lam})
 
 
 def snapshots(
