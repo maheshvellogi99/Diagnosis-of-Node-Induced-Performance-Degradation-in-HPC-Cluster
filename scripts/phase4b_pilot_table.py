@@ -17,7 +17,7 @@ VARIANTS = {"v1": "lr_Sc_a", "v2": "lr_Sc_a_blame"}
 def lam_summary(rs, v):
     x = pd.DataFrame([g for r in rs for g in r["variants"][v]["lambda_degraded"]])
     return {
-        "mean_lam_all": float(np.average(x["mean_lam"], weights=x["n_after"])),
+        "mean_lam_all": float(np.average(x["mean_lam"].fillna(0), weights=x["n_after"])),
         "mean_lam_multi": float(
             np.average(x["mean_lam_multi"].fillna(0), weights=x["n_after_multi"])
         ),
