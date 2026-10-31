@@ -492,6 +492,23 @@ n ∈ N_j:
 - Validity condition [A, tested in Gate 4a]: under "node n is healthy", the p-values of jobs on n
   are sequentially valid, E[f(p_j) | past] ≤ 1. This holds if p-values are uniform given the past
   (Mode E) and node placement does not depend on lateness.
+- **Honest validity statement (D72).** The per-node null "p-values of jobs on n are super-uniform
+  given the past" is violated for a healthy node that shares jobs with a degraded node (straggler
+  contamination: the shared job is late because of the other node). The guarantee is exact under the
+  global null (no degraded node) given the validity condition above; with degraded nodes present,
+  FDR is controlled empirically, not proved. Measured as co-allocated false flags (§10, D71).
+- **Predictable blame allocation, "explaining away" (D71, Phase 4b design v2).** v2 replaces the
+  weight w_j = 1/|N_j| by
+
+    λ_{j,n} = M_n⁻ / Σ_{k ∈ N_j} M_k⁻,
+
+  where M_k⁻ is node k's total jumper capital just before job j is processed (D14 order; all jobs
+  with the same end time use the state before that tie block). λ_{j,n} ∈ (0, 1], and each job's λ
+  sum to 1 over N_j. It reduces to 1/|N_j| when all M are equal; a single-node job has λ = 1. No new
+  parameter. λ uses only jobs that ended before j, so it is predictable and each node's e-process
+  stays valid (F16). It is not known at job start, unlike w_j: the "past" in the validity condition
+  must be the past of ALL nodes up to j, which is the filtration of the proof in 4.3. v1 (w_j) stays
+  the Phase 4 result; v1 and v2 are compared on fresh seeds (D70, D74).
 - Work in log space: log M (avoid overflow).
 - Per-node job order (D14): jobs are applied to M_n in `end_time` order, ties broken by `row_id`.
   Same-node overlaps ≤ 60 s (Phase 0: max 19 s) are treated as non-overlapping. The PM100
@@ -518,7 +535,10 @@ applied to the e-values M_1(τ ∧ T), …, M_m(τ ∧ T) controls FDR ≤ α un
 P(e-BH at τ ∧ T rejects anything). If τ ≤ T, e-BH at τ rejects by definition; if τ = ∞, it rejects
 nothing at T. Hence P(τ ≤ T) = FDR(τ ∧ T) ≤ α. This holds for any dependence between nodes and any
 number of evaluation times, provided m is fixed (D50) and every update is predictable (guard (b)
-freezes are decided from jobs that ended before j, D51).
+freezes are decided from jobs that ended before j, D51). The proof applies unchanged to λ_{j,n}
+(D71): τ was already defined on the filtration of all nodes, and each λ_{j,n} is measurable with
+respect to that filtration before p_j is seen, so each M_n is still an e-process under the global
+null. With degraded nodes present the contaminated healthy nodes break the premise (D72).
 
 **4.4 Baselines.**
 - B1 guide heuristic: median relative residual > 20%, ≥ 10 jobs, ≥ 3 users, ≥ 3 distinct job
@@ -617,6 +637,7 @@ end, status, key metrics. Reports cite run ids.
 | Workload drift breaks exchangeability | Mode A, ACI, short calibration windows; report measured (not just theoretical) error rates |
 | System-wide slowdowns inflate all nodes | §4.2 guard; shock scenarios in Phase 3 |
 | Node placement correlated with lateness (e.g. certain users on certain racks) | Mondrian by user; check per-node p-value uniformity on clean data (Gate 4a) |
+| Straggler contamination: a healthy node sharing jobs with a degraded node sees late jobs, so its per-node null is violated (D72) | Guarantee stated as exact only under the global null; co-allocated false flags measured separately; D71 blame allocation measured against v1 |
 | Injection model too simple (straggler assumption) | "partial" variant; Phase 6 real injections |
 | PM100 contains only exclusive jobs | state as limitation; shared-node jobs future work |
 | PM100 has no job name, so baseline B1 drops the "≥ 3 applications" condition (D13) | state as limitation; B1 on PM100 is weaker than the guide's rule as written |
@@ -749,3 +770,8 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D67 | 10 Oct 2026 | Gate 4b unchanged and reported as measured. Evidence budget added: nats needed = log(980/0.1) + log(number of jumper states / J); measured mean log-growth per job-node pair after onset on degraded nodes (seeds 5–19); node pair rate → predicted delay; predicted vs observed per s | Mahesh |
 | D68 | 10 Oct 2026 | Detection is right-censored at the trace end: Kaplan–Meier curves of P(detected within d days of onset) per s and K, with KM median delay, in addition to recall at trace end; delay vs the node's job-node-pair rate | Mahesh |
 | D69 | 10 Oct 2026 | Price of the guarantee: B5 (per-node Ville, no multiplicity control) and e-BH at α ∈ {0.05, 0.1, 0.2} shown together as delay vs FDP | Mahesh |
+| D70 | 31 Oct 2026 | Fresh evaluation seeds. Seeds 5–19 have now been looked at, so every NEW Layer-2 design is judged only on new seeds 20–39: node scenarios (both bases, K ∈ {1, 2, 5}%, s ∈ {1.1, 1.2, 1.3, 1.5, 2.0, 3.0}), user_decoy, user_decoy_heavy, system_shock, plus random-placement nulls with base seeds 200–399. Phase 3 code and config unchanged (the same keyed draws, through a separate driver that imports them). Seeds 0–19 become development seeds | Mahesh |
+| D71 | 31 Oct 2026 | Predictable blame allocation ("explaining away", v2): replace w_j = 1/|N_j| by λ_{j,n} = M_n⁻ / Σ_{k ∈ N_j} M_k⁻, M_k⁻ = node k's total jumper capital just before job j (D14 order; jobs with the same end time all use the state before that tie block). λ ∈ (0, 1], predictable, reduces to 1/|N_j| when all M are equal, = 1 for single-node jobs. No other parameter. The D49 stopping-time proof still applies | Mahesh |
+| D72 | 31 Oct 2026 | Honest validity statement in PLAN Phase 4.1: the per-node null is violated for a healthy node that shares jobs with a degraded node (straggler contamination). The guarantee is exact under the global null; with degraded nodes present, FDR is controlled empirically. Measure whether D71 reduces co-allocated false flags | Mahesh |
+| D73 | 31 Oct 2026 | Development pilot: seeds 0–4, K = 1%, s ∈ {1.3, 2.0, 3.0}, random base, plus the 20 original nulls. Compare v1 (lr_Sc_a) with v2 (lr_Sc_a + D71): KM median delay, share found within 14 d, recall at trace end, mean FDP, co-allocated false flags, mean λ on degraded nodes after onset, null P(ever). Show the numbers and STOP | Mahesh |
+| D74 | 31 Oct 2026 | Only after Mahesh's go: v1 and v2 on fresh seeds 20–39 and nulls 200–399, Gate 4a and Gate 4b definitions unchanged; reports/phase_4b.md | Mahesh |

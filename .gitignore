@@ -11,3 +11,4 @@ __pycache__/
 .ipynb_checkpoints/
 # Claude Code /export transcripts (local only)
 *-local-command-caveat*.txt
+hpc_claude_code_complete_conversation*.txt
