@@ -1,4 +1,4 @@
-"""Why does v2 (D71) flag nulls? Null diagnostics on the Phase 3 null bases 0..199 (not fresh seeds).
+"""Why does v2 (D71) flag nulls? Diagnostics on Phase 3 null bases 0..199 (not fresh seeds).
 
     uv run python scripts/diag_d71_null.py --config configs/phase4_layer2.yaml --workers 7
 
@@ -25,7 +25,7 @@ from hpcdiag.layer2 import accumulate as A
 from hpcdiag.layer2 import prep as P
 from hpcdiag.layer2 import run_layer2 as R
 from hpcdiag.layer2 import select as SEL
-from hpcdiag.utils.run import Run, resolve, run_guarded, start_run
+from hpcdiag.utils.run import Run, run_guarded, start_run
 
 STREAMS = ("real", "iid", "perm", "perm_in_size")
 # v1_w1: v1 with w = 1 instead of 1/|N_j| (no dilution): direct check of D76 (ii)
