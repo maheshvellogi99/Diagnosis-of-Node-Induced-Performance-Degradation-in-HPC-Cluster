@@ -7,6 +7,7 @@ Variant sets (D58):
 - "ablation": jumper (primary) / plain product / jumper + decoy weight, each with guard none, (a),
   (b); B6 sensitivity (Mode P W = 1 d, 365 d, Mode E as-run; jumper, no guard); baselines B1-B5.
 - "primary": jumper with guard none, (a), (b); baselines B1-B5.
+- "compare4b": v1 lr_Sc_a (w = 1/|N_j|) vs v2 lr_Sc_a_blame (D71), no baselines (D73, D74).
 Every variant uses e-BH with fixed m (D50) at alpha (and the alpha curve) every 6 h.
 """
 
@@ -37,7 +38,7 @@ G: dict = {}  # per-process globals (filled by _init)
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--mode", choices=["pilot", "pilot2", "full"], required=True)
+    ap.add_argument("--mode", choices=["pilot", "pilot2", "full", "pilot4b"], required=True)
     ap.add_argument("--workers", type=int, default=7)
     a = ap.parse_args()
     run = start_run("phase4", a.config, tag=a.mode)
@@ -124,7 +125,7 @@ def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dic
     t0 = time.time()
     ps["P7_a"] = P.mode_p(pop, l1["window_hours"], l1["min_ref"], l1["guard_a_hours"])
     t["modeP7_guard_a"] = time.time() - t0
-    if variant_set in ("pilot2", "primary2", "ablation2"):
+    if variant_set in ("pilot2", "primary2", "ablation2", "compare4b"):
         t0 = time.time()
         pop = P.add_centred(pop, l1["centre_window_hours"], l1["centre_min_n"])
         ps["Sc"] = P.mode_p_on(pop, "score_c", l1["window_hours"], l1["min_ref"])
@@ -150,6 +151,11 @@ def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dic
 def _variants(variant_set: str) -> list[tuple[str, str, str, float | None, bool, str]]:
     """(name, p key, guard, J, decoy weight, bet: 'kappa' or a key of G['bets'])."""
     J = G["cfg"]["layer2"]["jumper_J"]
+    if variant_set == "compare4b":  # D73/D74; the _blame suffix selects D71
+        return [
+            ("lr_Sc_a", "Sc_a", "a", J, False, "Sc_a"),
+            ("lr_Sc_a_blame", "Sc_a", "a", J, False, "Sc_a"),
+        ]
     if variant_set in ("primary2", "ablation2"):  # full grid (D58 allocation, D65)
         out = [
             ("lr_Sc_none", "Sc", "none", J, False, "Sc"),
@@ -271,7 +277,10 @@ def _process(task: tuple[str, str]) -> dict:
                 frozen[pkey] = A.guard_b_frozen(p, end_ns, gb["J"], gb["ratio"])
             fz = frozen[pkey]
         bets = lc["kappas"] if bet == "kappa" else G["bets"][bet]
-        ev = A.node_evidence(pairs, p, w_decoy if dw else w_base, bets, J, fz)
+        if name.endswith("_blame"):
+            ev = A.node_evidence_blame(pairs, p, bets, J, fz)
+        else:
+            ev = A.node_evidence(pairs, p, w_decoy if dw else w_base, bets, J, fz)
         snap = A.snapshots(ev, eval_ns, m)
         out = _evaluate(
             snap,
@@ -284,10 +293,17 @@ def _process(task: tuple[str, str]) -> dict:
         )
         if guard == "b":
             out["frozen_share"] = float(fz.mean())
-        if node_kind and name in ("lr_Sc_none", "lr_Sc_a"):
+        if node_kind and name in ("lr_Sc_none", "lr_Sc_a", "lr_Sc_a_blame"):
             out["growth"] = _growth(ev, truth)  # D67 evidence budget
+        if vset == "compare4b" and node_kind:
+            out["lambda_degraded"] = _lambda_stats(ev, pairs, p, w_base, truth)
         res["variants"][name] = out
         T["variants"][name] = time.time() - t0
+    if vset == "compare4b":  # no baselines (D73, D74)
+        T["baselines"] = 0.0
+        T["total"] = time.time() - t_all
+        res["timing_s"] = T
+        return res
     # baselines (unguarded Mode P W = 7 d; on S_c with the LR primary in pilot2)
     t0 = time.time()
     v2 = vset in ("pilot2", "primary2", "ablation2")
@@ -395,6 +411,32 @@ def _growth(ev: pd.DataFrame, truth: pd.DataFrame) -> list[dict]:
     return out
 
 
+def _lambda_stats(
+    ev: pd.DataFrame, pairs: pd.DataFrame, p: np.ndarray, w: np.ndarray, truth: pd.DataFrame
+) -> list[dict]:
+    """D73: per degraded node, mean allocation on its updates after onset (lambda for v2, w for
+    v1), over all updates and over updates from multi-node jobs (single-node jobs give 1 in both).
+    Assumes no frozen updates (guard (a) or none), so ev rows = pairs with a finite p-value."""
+    use = np.isfinite(p[pairs["k"].to_numpy()])
+    n_nodes = pairs["n_nodes"].to_numpy()[use]
+    lam = ev["lam"].to_numpy() if "lam" in ev else w[use]
+    node, end = ev["node_id"].to_numpy(), ev["end_ns"].to_numpy()
+    out = []
+    for n, o in zip(truth["node_id"].astype(int), truth["onset_time"], strict=True):
+        after = (node == n) & (end > pd.Timestamp(o).value)
+        multi = after & (n_nodes > 1)
+        out.append(
+            {
+                "node_id": int(n),
+                "n_after": int(after.sum()),
+                "n_after_multi": int(multi.sum()),
+                "mean_lam": float(lam[after].mean()) if after.any() else float("nan"),
+                "mean_lam_multi": float(lam[multi].mean()) if multi.any() else float("nan"),
+            }
+        )
+    return out
+
+
 def _tasks_full(cfg: dict) -> list[tuple[str, str]]:
     """Every scenario. Ablation set (D58): random-base nulls, decoys, heavy decoys, shocks and
     the Gate 4b slice (node, random base, K = 1%, all s); everything else primary set."""
@@ -432,6 +474,18 @@ def _tasks_pilot2(cfg: dict) -> list[tuple[str, str]]:
     t = [(f"null__rand{k:02d}", "pilot2") for k in range(pc["null_bases"])]
     t += [
         (f"node__rand{k:02d}__K{pc['K_pct']}__s{s}__seed{k:02d}", "pilot2")
+        for s in pc["s"]
+        for k in pc["seeds"]
+    ]
+    return t
+
+
+def _tasks_pilot4b(cfg: dict) -> list[tuple[str, str]]:
+    """D73: v1 vs v2 on development seeds and the 20 original nulls."""
+    pc = cfg["pilot4b"]
+    t = [(f"null__rand{k:02d}", "compare4b") for k in range(pc["null_bases"])]
+    t += [
+        (f"node__rand{k:02d}__K{pc['K_pct']}__s{s}__seed{k:02d}", "compare4b")
         for s in pc["s"]
         for k in pc["seeds"]
     ]
@@ -492,7 +546,12 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
     t0 = time.time()
     _init(config_path)  # builds/validates the frozen cache
     log.info("frozen predictions: %s (%.0fs)", G["fr"].check, time.time() - t0)
-    tasks = {"pilot": _tasks_pilot, "pilot2": _tasks_pilot2, "full": _tasks_full}[mode](cfg)
+    tasks = {
+        "pilot": _tasks_pilot,
+        "pilot2": _tasks_pilot2,
+        "full": _tasks_full,
+        "pilot4b": _tasks_pilot4b,
+    }[mode](cfg)
     diag = _pilot2_diagnostics(cfg, log) if mode in ("pilot2", "full") else None
     log.info("%d tasks, %d workers", len(tasks), workers)
     out_path = run.dir / "results.jsonl"
