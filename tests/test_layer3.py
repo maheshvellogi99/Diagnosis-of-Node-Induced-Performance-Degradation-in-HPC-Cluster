@@ -576,3 +576,9 @@ def test_telemetry_variants_use_their_matrices():
     assert (ST.make_belief(cfg, v).conf == oof).all()
     w = ST.make_world(cfg, v, 1.3, np.zeros(2, int), np.zeros(2, int), 1, 2)
     assert (w.conf == cross).all()
+
+
+def test_config_keeps_null_kind():
+    from hpcdiag.utils.run import load_config
+
+    assert load_config("configs/phase5.yaml")["grid"]["validity_kinds"][0] == "null"

@@ -126,6 +126,10 @@ def world_arrays(meta: dict, truth: pd.DataFrame, n_nodes: int) -> tuple:
     return cause, onset, rows
 
 
+def bel_names(cfg: dict) -> list[str]:
+    return list(cfg["probes"]["names"])
+
+
 def run_one(sid, meta, truth, snap, extra, variant, base_policy, B) -> dict:
     cfg = L["cfg"]
     lc = R.G["cfg"]["layer2"]
@@ -167,9 +171,16 @@ def run_one(sid, meta, truth, snap, extra, variant, base_policy, B) -> dict:
             d["flagged"] = bool(first.get(d["node_id"], False))
             d["flagged_any_time"] = bool(ever[d["node_id"]])
     seqs: dict[str, int] = {}
+    names = [*bel_names(cfg), "tel"]
+    used = dict.fromkeys(names, 0)
+    second = dict.fromkeys(names, 0)  # probe chosen right after the first one
     for r in inv:
         k = str(len(r["seq"]))
         seqs[k] = seqs.get(k, 0) + 1
+        for a in r["seq"]:
+            used[names[a]] += 1
+        if len(r["seq"]) > 1:
+            second[names[r["seq"][1]]] += 1
     return {
         "scenario_id": sid,
         "kind": meta["kind"],
@@ -194,6 +205,8 @@ def run_one(sid, meta, truth, snap, extra, variant, base_policy, B) -> dict:
         "healthy_nodes_probed_per_day": len({(r["node"], r["t"] // 4) for r in healthy}) / days,
         "healthy_seconds_per_day": float(sum(r["seconds"] for r in healthy)) / days,
         "probes_per_investigation": seqs,
+        "probe_counts": used,
+        "second_probe": second,
         "max_logE_final": float(logE[-1].max()),
         "sim_s": t_sim,
         "total_s": time.time() - t0,
@@ -242,6 +255,33 @@ def tasks_full(cfg: dict, idx: pd.DataFrame) -> dict[str, list]:
     return t
 
 
+def tasks_addon(cfg: dict, idx: pd.DataFrame) -> dict[str, list]:
+    """Null bases (lost to an unquoted YAML null in the first full run), Gate 5a for the two other
+    investigation rules, and telemetry sensitivities on a rule that is not starved of budget."""
+    g = cfg["grid"]
+    t: dict[str, list] = {}
+
+    def add(sids, runs):
+        for s in sids:
+            t.setdefault(s, []).extend(runs)
+
+    rand = idx[idx["base"] != "real"]
+    nulls = rand[rand["kind"] == "null"]["scenario_id"].tolist()
+    decoys = rand[rand["kind"].isin(g["validity_kinds"]) & (rand["kind"] != "null")]
+    node = rand[rand["kind"] == "node"]
+    k1 = node[node["K_pct"] == 1]["scenario_id"].tolist()
+    b = g["sens_budget"]
+    rules = [("main", p, b) for p in g["sens_rules"]]
+    add(nulls, [("main", "ours", x) for x in [0, *g["budgets_ours"]]])
+    add(nulls, [(v, "ours", b) for v in g["sens_validity_variants"]])
+    add(nulls + decoys["scenario_id"].tolist() + node["scenario_id"].tolist(), rules)
+    add(k1, [("main", "ours_skipdone", x) for x in g["budgets_baselines"] + [7200] if x != b])
+    tel = ("tel_crossblock", "tel_design", "tel_transfer")
+    add(k1, [(v, "ours_skipdone", b) for v in tel] + [(v, "ours", 7200) for v in tel])
+    add(k1, [("main", "ours", b), ("main", "ours", 7200)])
+    return t
+
+
 def tasks_pilot(cfg: dict, idx: pd.DataFrame) -> dict[str, list]:
     g = cfg["grid"]
     t = {}
@@ -267,7 +307,7 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
     if problems:
         raise RuntimeError(f"raw checksum problems: {problems}")
     idx = pd.read_parquet(resolve("data/processed/scenarios/index.parquet"))
-    t = tasks_pilot(cfg, idx) if mode == "pilot" else tasks_full(cfg, idx)
+    t = {"pilot": tasks_pilot, "full": tasks_full, "addon": tasks_addon}[mode](cfg, idx)
     check_sealed(list(t))
     tasks = ordered(t)
     n_runs = sum(len(v) for _, v in tasks)
@@ -303,7 +343,7 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--mode", choices=["pilot", "full"], required=True)
+    ap.add_argument("--mode", choices=["pilot", "full", "addon"], required=True)
     ap.add_argument("--workers", type=int, default=7)
     a = ap.parse_args()
     return run_guarded(

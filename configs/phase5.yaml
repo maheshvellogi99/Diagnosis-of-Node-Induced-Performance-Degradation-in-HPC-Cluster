@@ -44,7 +44,7 @@ budget_check:                            # planning numbers only; development se
 grid:                                    # design §5-§6, D86, D91; development only (D77)
   budgets_ours: [60, 300, 1800, 7200]
   budgets_baselines: [60, 300, 1800]
-  validity_kinds: [null, user_decoy, user_decoy_heavy, system_shock]
+  validity_kinds: ["null", user_decoy, user_decoy_heavy, system_shock]
   sens_budget: 300
   sens_variants: [n_pool_200, pool_redraw, sigma_0.1, k_primary_2, pi0_0.1, pi0_0.9, misspec,
                   tel_crossblock, tel_design, tel_transfer]
