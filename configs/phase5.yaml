@@ -46,7 +46,8 @@ grid:                                    # design §5-§6, D86, D91; development
   budgets_baselines: [60, 300, 1800]
   validity_kinds: [null, user_decoy, user_decoy_heavy, system_shock]
   sens_budget: 300
-  sens_variants: [n_pool_200, pool_redraw, sigma_0.1, k_primary_2, pi0_0.1, pi0_0.9, misspec]
+  sens_variants: [n_pool_200, pool_redraw, sigma_0.1, k_primary_2, pi0_0.1, pi0_0.9, misspec,
+                  tel_crossblock, tel_design, tel_transfer]
   sens_rules: [ours_design_rule, ours_skipdone]
   sens_validity_variants: [n_pool_200, pool_redraw, misspec]
 
@@ -63,3 +64,7 @@ antarex:                                 # D94
     n_folds: 5                           # contiguous time segments
     purge_s: 3600
     forward_train_share: 0.6
+
+telemetry:                               # D94; rows true class, columns predicted: h0, cpu, cache, mbw, mem
+  counts: [[20039, 0, 0, 0, 0], [0, 1560, 0, 0, 0], [0, 0, 1617, 0, 0], [0, 0, 0, 1513, 0], [0, 0, 0, 0, 1630]]     # main: out-of-fold, run 20261102-003936-classifier
+  crossblock_counts: [[13318, 4906, 1815, 0, 0], [0, 1525, 35, 0, 0], [175, 453, 989, 0, 0], [0, 0, 0, 1500, 13], [0, 0, 0, 0, 1630]]     # sensitivity: train one block, test the other, both directions summed, run 20261102-004249-d94-diag

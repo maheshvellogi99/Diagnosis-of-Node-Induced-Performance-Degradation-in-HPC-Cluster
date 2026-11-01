@@ -24,6 +24,8 @@ class Variant:
     redraw_pool: bool = False  # D88
     misspec: bool = False  # outcomes from a perturbed table and true_sigma; pool at true_sigma
     true_sigma: float = 0.1
+    tel_belief: str = "oof"  # oof | crossblock | design: matrix the posterior uses
+    tel_world: str = "oof"  # matrix outcomes are drawn from
 
 
 VARIANTS = {
@@ -35,6 +37,9 @@ VARIANTS = {
     "pi0_0.1": Variant("pi0_0.1", pi0_h0=0.1),
     "pi0_0.9": Variant("pi0_0.9", pi0_h0=0.9),
     "misspec": Variant("misspec", misspec=True),
+    "tel_crossblock": Variant("tel_crossblock", tel_belief="crossblock", tel_world="crossblock"),
+    "tel_design": Variant("tel_design", tel_belief="design", tel_world="design"),
+    "tel_transfer": Variant("tel_transfer", tel_belief="oof", tel_world="crossblock"),
 }
 
 
@@ -54,13 +59,15 @@ def fixed_pools(names, sigma: float, n_pool: int, seed_key: list[int]) -> list[n
     return [np.sort(rng.normal(0, sigma, n_pool)) for _ in names]
 
 
-def telemetry_rows(cfg: dict) -> np.ndarray:
-    """P(class | hypothesis), rows and columns in the order of HYPOTHESES: the measured out-of-fold
-    counts with add-one smoothing [D] so that no outcome has probability 0 (D94), or, if none are
-    configured, the design confusion [A]."""
+def telemetry_rows(cfg: dict, which: str = "oof") -> np.ndarray:
+    """P(class | hypothesis), rows and columns in the order of HYPOTHESES. oof: the measured
+    out-of-fold counts (D94); crossblock: train on one Antarex block, test on the other. Add-one
+    smoothing [D] so that no outcome has probability 0. design, or no counts configured: the design
+    confusion [A]."""
     t = cfg.get("telemetry", {})
-    if t.get("counts") is not None:
-        c = np.asarray(t["counts"], float) + 1.0
+    key = {"oof": "counts", "crossblock": "crossblock_counts"}.get(which)
+    if key is not None and t.get(key) is not None:
+        c = np.asarray(t[key], float) + 1.0
         return c / c.sum(axis=1, keepdims=True)
     p = cfg["policy"]
     return PR.design_confusion(p["tel_correct"], p["tel_confused"], p["tel_healthy"])
@@ -77,7 +84,7 @@ def make_belief(cfg: dict, v: Variant) -> Belief:
         means=means,
         hyp=hyp,
         sigma=m.sigma,
-        conf=telemetry_rows(cfg),
+        conf=telemetry_rows(cfg, v.tel_belief),
         bets=bets,
         pi0=BY.prior(hyp, po["pi0_h0"] if v.pi0_h0 is None else v.pi0_h0),
         tau=float(po["tau"]),
@@ -115,7 +122,7 @@ def make_world(
         pools=fixed_pools(m.names, sigma, n_pool, key),
         means=means,
         sigma=sigma,
-        conf=telemetry_rows(cfg),
+        conf=telemetry_rows(cfg, v.tel_world),
         cause=cause,
         onset_idx=onset_idx,
     )

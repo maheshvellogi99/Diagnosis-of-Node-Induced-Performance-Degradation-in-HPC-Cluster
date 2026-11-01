@@ -561,3 +561,18 @@ def test_telemetry_rows_smoothed():
     r = ST.telemetry_rows({"telemetry": {"counts": c}})
     assert np.allclose(r.sum(axis=1), 1) and (r > 0).all()
     assert r[0, 0] == pytest.approx(9 / 13)
+
+
+def test_telemetry_variants_use_their_matrices():
+    from hpcdiag.layer3 import setup as ST
+    from hpcdiag.utils.run import load_config
+
+    cfg = load_config("configs/phase5.yaml")
+    oof = ST.telemetry_rows(cfg, "oof")
+    cross = ST.telemetry_rows(cfg, "crossblock")
+    design = ST.telemetry_rows(cfg, "design")
+    assert oof[1, 1] > 0.99 and cross[0, 0] < 0.9 and design[1, 1] == 0.8
+    v = ST.VARIANTS["tel_transfer"]
+    assert (ST.make_belief(cfg, v).conf == oof).all()
+    w = ST.make_world(cfg, v, 1.3, np.zeros(2, int), np.zeros(2, int), 1, 2)
+    assert (w.conf == cross).all()
