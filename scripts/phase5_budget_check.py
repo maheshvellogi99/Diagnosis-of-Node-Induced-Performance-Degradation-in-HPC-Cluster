@@ -3,7 +3,7 @@
     uv run python scripts/phase5_budget_check.py --config configs/phase5.yaml
 
 (a) bet g_a per probe (design §3) and E[log f] per cause and s;
-(b) spread of E[f(p) | pool] over pools under the healthy model (design §3 treats the pool as fixed);
+(b) spread of E[f(p) | pool] over pools under the healthy model (design §3 fixes one pool);
 (c) Rn(1) log E and rank of degraded nodes at onset + 7 d, + 14 d.
 """
 
