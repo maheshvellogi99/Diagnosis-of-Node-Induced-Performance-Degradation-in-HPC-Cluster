@@ -1,6 +1,7 @@
 """Tables for Phase 5 from a full run (docs/PHASE5_DESIGN.md §6-§7).
 
-    uv run python scripts/phase5_tables.py --run <run id> [--v1 20261010-094328-full]
+    uv run python scripts/phase5_tables.py --run <full run id> --addon <addon run id> \
+        [--v1 20261010-094328-full]
 """
 
 from __future__ import annotations
@@ -21,6 +22,18 @@ VALID_KINDS = ("null", "user_decoy", "user_decoy_heavy", "system_shock")
 def load(run: str) -> list[dict]:
     with open(resolve(f"runs/phase5/{run}/results.jsonl")) as fh:
         return [json.loads(x) for x in fh]
+
+
+def merged(*runs: str) -> list[dict]:
+    """Rows of several runs; a repeated (scenario, variant, policy, B) keeps the first."""
+    out, seen = [], set()
+    for rid in runs:
+        for r in load(rid):
+            k = (r["scenario_id"], r["variant"], r["policy"], r["B"])
+            if k not in seen:
+                seen.add(k)
+                out.append(r)
+    return out
 
 
 def pick(res, **kw):
@@ -106,7 +119,7 @@ def confusion(rs) -> dict:
     return rows
 
 
-def tables(res, v1) -> dict:
+def tables(res, v1, addon) -> dict:
     t: dict = {}
     main = pick(res, variant="main")
     budgets = sorted({r["B"] for r in pick(main, policy="ours")})
@@ -116,21 +129,36 @@ def tables(res, v1) -> dict:
         for B in budgets:
             rows.append(
                 {
-                    "kind": kind, "row": "ours", "B": B,
+                    "kind": kind,
+                    "row": "ours",
+                    "B": B,
                     **validity_row(pick(main, policy="ours", B=B, kind=kind, random=True)),
                 }
             )
         for v in sorted({r["variant"] for r in res} - {"main"}):
-            rs = pick(res, variant=v, kind=kind, random=True)
+            rs = pick(res, variant=v, policy="ours", B=300, kind=kind, random=True)
             if rs:
                 rows.append({"kind": kind, "row": v, "B": 300, **validity_row(rs)})
-        rs = [r for r in v1 if r["kind"] == kind and r["base"] != "real" and (
-            r["seed"] is None or r["seed"] <= 19)]
+        for p in ("ours_design_rule", "ours_skipdone"):
+            rs = pick(main, policy=p, B=300, kind=kind, random=True)
+            rows.append({"kind": kind, "row": p, "B": 300, **validity_row(rs)})
+        rs = [
+            r
+            for r in v1
+            if r["kind"] == kind and r["base"] != "real" and (r["seed"] is None or r["seed"] <= 19)
+        ]
         x = np.array([r["variants"]["lr_Sc_a"]["ever_flagged"] for r in rs], float)
-        rows.append({"kind": kind, "row": "v1", "B": 0, "n": len(x), "P_ever": float(x.mean()),
-                     "se": float(np.sqrt(x.mean() * (1 - x.mean()) / len(x))),
-                     "pass": bool(x.mean() <= ALPHA + 2 * np.sqrt(
-                         x.mean() * (1 - x.mean()) / len(x)))})
+        rows.append(
+            {
+                "kind": kind,
+                "row": "v1",
+                "B": 0,
+                "n": len(x),
+                "P_ever": float(x.mean()),
+                "se": float(np.sqrt(x.mean() * (1 - x.mean()) / len(x))),
+                "pass": bool(x.mean() <= ALPHA + 2 * np.sqrt(x.mean() * (1 - x.mean()) / len(x))),
+            }
+        )
     t["validity"] = rows
     rows = []
     for K in (1, 2, 5):
@@ -138,10 +166,21 @@ def tables(res, v1) -> dict:
             for B in budgets:
                 rs = pick(main, policy="ours", B=B, kind="node", K_pct=K, s=s, random=True)
                 rows.append({"K": K, "s": s, "row": "ours", "B": B, **speed_row(rs)})
-            vr = [r for r in v1 if r["kind"] == "node" and r["base"] != "real"
-                  and r["K_pct"] == K and r["s"] == s]
-            vm = [{"metrics": r["variants"]["lr_Sc_a"], "scenario_id": r["scenario_id"],
-                   "s": s, "K_pct": K, "seed": r["seed"]} for r in vr]
+            vr = [
+                r
+                for r in v1
+                if r["kind"] == "node" and r["base"] != "real" and r["K_pct"] == K and r["s"] == s
+            ]
+            vm = [
+                {
+                    "metrics": r["variants"]["lr_Sc_a"],
+                    "scenario_id": r["scenario_id"],
+                    "s": s,
+                    "K_pct": K,
+                    "seed": r["seed"],
+                }
+                for r in vr
+            ]
             rows.append({"K": K, "s": s, "row": "v1", "B": 0, **speed_row(vm)})
     t["speed"] = rows
     gate = pick(main, policy="ours", B=300, kind="node", K_pct=1, s=1.3, random=True)
@@ -164,42 +203,102 @@ def tables(res, v1) -> dict:
     rs = pick(main, policy="ours", B=300, kind="node", random=True)
     t["confusion_B300"] = confusion(rs)
     rows = []
-    sens = [("main", "ours"), ("main", "ours_design_rule"), ("main", "ours_skipdone")]
-    sens += [(v, "ours") for v in sorted({r["variant"] for r in res} - {"main"})]
-    for v, p in sens:
+    sens = [("main", q, 300) for q in ("ours", "ours_design_rule", "ours_skipdone")]
+    sens += [(v, "ours", 300) for v in sorted({r["variant"] for r in res} - {"main"})]
+    tel = ("tel_crossblock", "tel_design", "tel_transfer")
+    sens += [(v, "ours_skipdone", 300) for v in tel]
+    sens += [("main", "ours", 7200)] + [(v, "ours", 7200) for v in tel]
+    for v, p, B in sens:
         for s in s_list:
-            rs = pick(res, variant=v, policy=p, B=300, kind="node", K_pct=1, s=s, random=True)
-            rows.append({"row": f"{v}/{p}", "s": s, **speed_row(rs), **diag_row(rs)})
+            rs = pick(res, variant=v, policy=p, B=B, kind="node", K_pct=1, s=s, random=True)
+            rows.append({"row": f"{v}/{p}/B{B}", "s": s, **speed_row(rs), **diag_row(rs)})
     t["sensitivity"] = rows
+    rows = []
+    for p in ("ours", "ours_design_rule", "ours_skipdone"):
+        rs = pick(main, policy=p, B=300, kind="node", random=True)
+        rows.append({"rule": p, **diag_row(rs)})
+        fl = [d for r in rs for d in r["diagnosis"] if d.get("flagged") and d["investigated"]]
+        lo = [d for d in fl if d["pi_out"] < 0.95]
+        rows[-1]["share_output_pi_below_tau"] = len(lo) / len(fl)
+        rows[-1]["accuracy_output_pi_below_tau"] = sum(d["correct"] for d in lo) / max(len(lo), 1)
+        hi = [d for d in fl if d["pi_out"] >= 0.95]
+        rows[-1]["accuracy_output_pi_at_tau"] = sum(d["correct"] for d in hi) / max(len(hi), 1)
+    t["gate5c_rules"] = rows
+    t["confusion_rules"] = {
+        p: confusion(pick(main, policy=p, B=300, kind="node", random=True))
+        for p in ("ours_design_rule", "ours_skipdone")
+    }
     rows = []
     for B in budgets:
         rs = pick(main, policy="ours", B=B, kind="node", K_pct=1, s=1.3, random=True)
-        rows.append({"B": B, "km_F14": speed_row(rs)["km_F14"]})
+        rows.append({"policy": "ours", "B": B, "km_F14": speed_row(rs)["km_F14"]})
+    for B in (60, 300, 1800, 7200):
+        rs = pick(main, policy="ours_skipdone", B=B, kind="node", K_pct=1, s=1.3, random=True)
+        rows.append({"policy": "ours_skipdone", "B": B, "km_F14": speed_row(rs)["km_F14"]})
     t["d91"] = rows
-    ok = [r["B"] for r in rows if r["km_F14"] >= 0.8]
+    ok = [r["B"] for r in rows if r["km_F14"] >= 0.8 and r["policy"] == "ours"]
     t["d91_smallest_B"] = min(ok) if ok else None
-    ok = []
-    for p in ("ours_skipdone",):
+    t["gate5b_rows"] = []
+    for p in ("ours_design_rule", "ours_skipdone"):
         rs = pick(main, policy=p, B=300, kind="node", K_pct=1, s=1.3, random=True)
-        if rs:
-            ok.append({"policy": p, **speed_row(rs), "ci": km_ci(rs)})
-    t["gate5b_rows"] = ok
+        t["gate5b_rows"].append({"policy": p, **speed_row(rs), "ci": km_ci(rs)})
+    rows = []
+    for p, B in (("ours", 300), ("ours", 7200), ("ours_skipdone", 300)):
+        rs = [
+            r
+            for r in addon
+            if r["policy"] == p
+            and r["B"] == B
+            and r["variant"] == "main"
+            and r["kind"] == "node"
+            and r["K_pct"] == 1
+            and r["base"] != "real"
+        ]
+        n = sum(r["n_investigations"] for r in rs)
+        used = {a: sum(r["probe_counts"][a] for r in rs) / n for a in rs[0]["probe_counts"]}
+        sec = {
+            a: sum(r["second_probe"][a] for r in rs)
+            / max(sum(sum(r["second_probe"].values()) for r in rs), 1)
+            for a in rs[0]["second_probe"]
+        }
+        rows.append(
+            {
+                "policy": p,
+                "B": B,
+                "investigations": n,
+                **{f"used_{a}": v for a, v in used.items()},
+                **{f"second_{a}": v for a, v in sec.items()},
+                "healthy_share_of_seconds": float(
+                    np.mean([r["healthy_seconds_per_day"] / r["seconds_per_day"] for r in rs])
+                ),
+            }
+        )
+    t["probe_mix"] = rows
     rows = []
     for B in sorted({r["B"] for r in res if r["base"] == "real"}):
         for kind in ("node", "null"):
             for s in s_list if kind == "node" else [None]:
-                rs = [r for r in pick(main, policy="ours", B=B, kind=kind) if r["base"] == "real"
-                      and r["s"] == s]
+                rs = [
+                    r
+                    for r in pick(main, policy="ours", B=B, kind=kind)
+                    if r["base"] == "real" and r["s"] == s
+                ]
                 if rs:
                     rows.append(
                         {
-                            "kind": kind, "s": s, "B": B, "scen": len(rs),
-                            "distinct_flagged": float(np.mean(
-                                [r["metrics"]["distinct_nodes_ever"] for r in rs])),
-                            "flags_per_day": float(np.mean(
-                                [r["metrics"]["flags_per_day"] for r in rs])),
-                            "healthy_s_per_day": float(np.mean(
-                                [r["healthy_seconds_per_day"] for r in rs])),
+                            "kind": kind,
+                            "s": s,
+                            "B": B,
+                            "scen": len(rs),
+                            "distinct_flagged": float(
+                                np.mean([r["metrics"]["distinct_nodes_ever"] for r in rs])
+                            ),
+                            "flags_per_day": float(
+                                np.mean([r["metrics"]["flags_per_day"] for r in rs])
+                            ),
+                            "healthy_s_per_day": float(
+                                np.mean([r["healthy_seconds_per_day"] for r in rs])
+                            ),
                         }
                     )
     t["real"] = rows
@@ -209,19 +308,35 @@ def tables(res, v1) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
+    ap.add_argument("--addon", required=True)
     ap.add_argument("--v1", default="20261010-094328-full")
     a = ap.parse_args()
-    res = load(a.run)
+    res = merged(a.run, a.addon)
+    addon = load(a.addon)
     with open(resolve(f"runs/phase4/{a.v1}/results.jsonl")) as fh:
         v1 = [json.loads(x) for x in fh]
-    t = tables(res, v1)
+    t = tables(res, v1, addon)
+    pilot = {}
+    with open(resolve("runs/phase4/20261101-214937-pilot4c/results.jsonl")) as fh:
+        for x in fh:
+            r = json.loads(x)
+            pilot[r["scenario_id"]] = r["variants"]["Rn1"]["max_logM_final"]
+    same = [
+        abs(r["max_logE_final"] - pilot[r["scenario_id"]])
+        for r in res
+        if r["B"] == 0 and r["scenario_id"] in pilot
+    ]
+    t["b0_matches_phase4c_Rn1"] = {"scenarios": len(same), "max_abs_diff": max(same)}
     out = resolve(f"runs/phase5/{a.run}/tables.json")
     out.write_text(json.dumps(t, indent=1, default=float))
     pd.set_option("display.width", 250, "display.max_columns", 40, "display.max_rows", 500)
     for k, v in t.items():
         print(f"\n== {k}")
-        print(pd.DataFrame(v).round(3).to_string(index=False) if isinstance(v, list) and v
-              and isinstance(v[0], dict) else v)
+        print(
+            pd.DataFrame(v).round(3).to_string(index=False)
+            if isinstance(v, list) and v and isinstance(v[0], dict)
+            else v
+        )
 
 
 if __name__ == "__main__":
