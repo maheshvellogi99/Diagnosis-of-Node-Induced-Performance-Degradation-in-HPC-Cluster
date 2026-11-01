@@ -49,3 +49,17 @@ grid:                                    # design §5-§6, D86, D91; development
   sens_variants: [n_pool_200, pool_redraw, sigma_0.1, k_primary_2, pi0_0.1, pi0_0.9, misspec]
   sens_rules: [ours_design_rule, ours_skipdone]
   sens_validity_variants: [n_pool_200, pool_redraw, misspec]
+
+antarex:                                 # D94
+  blocks:
+    - {name: mono, dir: data/interim/antarex/mono/results,
+       labels: labels_injection-mono_workload-129.132.24.206_30000.csv}
+    - {name: multi, dir: data/interim/antarex/multi/results_cpu-mem-multi,
+       labels: labels_injection-multi_workload-129.132.24.206_30000.csv}
+  rf:                                    # fixed before any result; no tuning
+    n_estimators: 300
+    class_weight: balanced
+    n_jobs: 7
+    n_folds: 5                           # contiguous time segments
+    purge_s: 3600
+    forward_train_share: 0.6
