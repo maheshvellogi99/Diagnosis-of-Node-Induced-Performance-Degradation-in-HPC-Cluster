@@ -146,7 +146,7 @@ def node_evidence_relative(
     J: float,
     lam: float,
     grid: np.ndarray,
-    denom: str = "pair",
+    denom: str = "node",
 ) -> pd.DataFrame:
     """D78: one update per (block, node with a pair in the block), dated at the block end. Pairs
     without a p-value and jobs ending after the last block do not count. Same output columns as

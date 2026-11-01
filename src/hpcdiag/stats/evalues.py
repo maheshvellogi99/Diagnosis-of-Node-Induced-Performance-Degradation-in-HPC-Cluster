@@ -215,14 +215,16 @@ def relative_evalues(
     node: np.ndarray,
     f: np.ndarray,
     m: int,
-    denom: str = "pair",
+    denom: str = "node",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Relative e-values (D78). One row per pair (job, node); `f` (n, K) = bet values at p_j.
 
     For each (block, node) with at least one pair: e = (mean of f over the node's pairs) / fbar,
     with fbar taken over the block and the node's partition only:
-      denom = "pair": pair-weighted mean over all pairs (D78 as specified);
-      denom = "node": mean of the node means over the partition's nodes with a pair in the block.
+      denom = "node": mean of the node means over the partition's nodes with a pair in the block
+      (Rn, adopted, D83);
+      denom = "pair": pair-weighted mean over all pairs (R, retired: unfair for mixed job sizes;
+      kept to reproduce Phase 4c).
     A block whose fbar is 0 has every f = 0 and gets e = 1. Returns (block, node, e) sorted by
     (block, node); nodes without a pair in a block have no row."""
     if denom not in ("pair", "node"):

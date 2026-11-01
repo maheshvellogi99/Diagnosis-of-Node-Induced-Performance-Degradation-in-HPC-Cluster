@@ -520,16 +520,19 @@ n ∈ N_j:
   Each jumper state updates M ← M (1 + λ (e_{n,b} − 1)), with λ a constant fixed in advance; nodes
   with no pair in b are not updated. Jumper (J = 0.01, same states and bets) and e-BH (α = 0.1,
   m = 980) are unchanged. Scores: S_c, Mode P W = 7 d, no guard (a). Variants R(1), R(0.25) (D79).
-- **Validity of D78: the proof as first specified does not hold (found by the D80(1) enumeration).**
-  The specified argument was that node n's pairs are a uniform draw from the block's pairs in its
-  partition, so E[e_{n,b} | …] = 1. That is true when all jobs in the block have the same |N_j|. It
-  is false for mixed sizes, because job size enters through the number of pairs K_n. Exact
-  counterexample, 3 nodes, job A size 1, job B size 2, drawn as in the random base: f_A = 3, f_B = 0
-  gives mean update 8/9; f_A = 0, f_B = 3 gives 19/18 > 1. So R(λ) with the pair-weighted f̄ is
-  not an e-process under the global null. How far it drifts is measured in reports/phase_4c.md.
-- **Candidate correction, NOT adopted (Rn, awaiting Mahesh's decision; changes a D78 formula).**
-  Replace f̄_{b,q} by a_{b,q} = the mean of a_{n,b} over the nodes of q with a pair in b, where
-  a_{n,b} = mean of f(p_j) over n's pairs. It equals f̄_{b,q} when every active node has one pair.
+- **Rn(1) is the Layer-2 configuration for Phase 5 (D83).** The pair-weighted form R of D78 is
+  retired. v1 (lr_Sc_a) stays in every table as "faster, empirical validity only".
+- **The architect's D78 proof was wrong (D83).** It argued that node n's pairs are a uniform draw
+  from the block's pairs in its partition, so E[e_{n,b} | …] = 1 with the pair-weighted f̄_{b,q}.
+  That is true when all jobs in the block have the same |N_j|. It is false for mixed sizes: e divides
+  by the node's own pair count K_n, and K_n depends on which jobs landed on the node, while the
+  pair-weighted mean weights each job by its size. Exact counterexample, found by the D80(1)
+  enumeration: 3 nodes, job A size 1, job B size 2, each drawn as in the random base. f_A = 3,
+  f_B = 0 gives mean update 8/9; f_A = 0, f_B = 3 gives 19/18 > 1. So R(λ) is not an e-process under
+  the global null. Its measured drift on this trace was small (reports/phase_4c.md).
+- **Adopted denominator, Rn (D83).** Replace f̄_{b,q} by a_{b,q} = the mean of a_{n,b} over the nodes
+  of q with a pair in b, where a_{n,b} = mean of f(p_j) over n's pairs, so
+  e_{n,b} = a_{n,b} / a_{b,q}. It equals the pair-weighted form when every active node has one pair.
   Proof. Assume the global null and placement independent of p-values, with each job's node set
   uniform within its partition, independently across jobs (true by construction on the random base).
   Fix all p-values and sizes of the whole trace, all placements before b, and block b's placement
@@ -668,7 +671,7 @@ end, status, key metrics. Reports cite run ids.
 | Node placement correlated with lateness (e.g. certain users on certain racks) | Mondrian by user; check per-node p-value uniformity on clean data (Gate 4a) |
 | Straggler contamination: a healthy node sharing jobs with a degraded node sees late jobs, so its per-node null is violated (D72) | Guarantee not claimed with degraded nodes present; co-allocated false flags measured separately. D71 blame allocation did not reduce them on the development pilot and is rejected (D75) |
 | Real Mode P p-values are marginally but not conditionally calibrated: temporal clustering (autocorrelation of 1{p < 0.1} = 0.29, 0.20, 0.06 at lags 1, 10, 100) breaks the condition behind the e-process guarantee, even under the global null (D76) | Gate 4a on the real p-value trace is the evidence, stated as empirical; v1 passes it partly because w_j = 1/\|N_j\| dilutes bursts, so designs that concentrate bets must be re-checked on real nulls (D71: 0.300 ± 0.032 vs 0.035 on iid p-values). Details in reports/phase_4b.md |
-| Relative e-values (D78) rely on placement being exchangeable within a partition and block: true by construction on the random base, an assumption [A] on the real placement | Evaluated on the random base only so far (Phase 4c); the real base is not evaluated |
+| Relative e-values (D78) rely on placement being exchangeable within a partition and block: true by construction on the random base, an assumption [A] on the real placement | Validity results are on the random base; on the real base flags are reported as unknown truth, with placement concentration per flagged node (D84) |
 | Injection model too simple (straggler assumption) | "partial" variant; Phase 6 real injections |
 | PM100 contains only exclusive jobs | state as limitation; shared-node jobs future work |
 | PM100 has no job name, so baseline B1 drops the "≥ 3 applications" condition (D13) | state as limitation; B1 on PM100 is weaker than the guide's rule as written |
@@ -814,3 +817,6 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D80 | 1 Nov 2026 | Tests first: exact enumeration of block placements; simulation with bursts under random placement; means per partition using block-b jobs only; λ fixed in advance, nodes with no pairs not updated | Mahesh |
 | D81 | 1 Nov 2026 | Development evaluation only: (a) null diagnostic on 200 old bases for R(1), R(0.25), v1, v1 w = 1; (b) dev pilot seeds 0–4, node, K = 1%, s ∈ {1.3, 2.0, 3.0}, random base; (c) user_decoy, user_decoy_heavy, system_shock, random base, seeds 0–19: P(ever) | Mahesh |
 | D82 | 1 Nov 2026 | Sealing unchanged (D77). reports/phase_4c.md | Mahesh |
+| D83 | 1 Nov 2026 | Adopt the Rn denominator (mean of node means over active nodes; exact for any job sizes). Layer 2 for Phase 5 = Rn(1). v1 (lr_Sc_a) stays in every table as \"faster, empirical validity only\". R (pair-weighted) retired. The architect's D78 proof was wrong: the uniform-draw argument fails for mixed job sizes (PLAN Phase 4.1) | Mahesh |
+| D84 | 1 Nov 2026 | Real-placement check of Rn(1), development only: real-base null P(ever), flagged nodes with first-flag dates, overlap with the Phase 2 exploratory list (840, 287, 841, 80, 309, 81, 441, 42, 679, 40) and with Phase 4's 9 real-null flags under v1, and per flagged node the share of its jobs from its single top user. Exploratory, unknown truth | Mahesh |
+| D85 | 1 Nov 2026 | Commit docs/PHASE5_DESIGN.md (docs only). It supersedes PROMPT 5 in docs/PHASE_PROMPTS_5_6.md and LAYER3_DESIGN.md §3–§4; LAYER3_DESIGN §1–§2 and §5 still stand | Mahesh |

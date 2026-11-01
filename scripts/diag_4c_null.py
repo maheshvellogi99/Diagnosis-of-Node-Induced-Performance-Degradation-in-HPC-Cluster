@@ -72,7 +72,9 @@ def drift(pairs: pd.DataFrame, p: np.ndarray, bets, m: int) -> list[float]:
     use = np.isfinite(p[pk]) & (b < len(L["grid"]))
     pu = p[pk][use]
     f = np.column_stack([g(pu) for g in bets])
-    br, _, e = relative_evalues(b[use], L["part"][pk[use]], pairs["node_id"].to_numpy()[use], f, m)
+    br, _, e = relative_evalues(
+        b[use], L["part"][pk[use]], pairs["node_id"].to_numpy()[use], f, m, "pair"
+    )
     _, inv = np.unique(br, return_inverse=True)
     c = np.bincount(inv)
     return [float(np.log(np.bincount(inv, weights=e[:, k]) / c).sum()) for k in range(e.shape[1])]
