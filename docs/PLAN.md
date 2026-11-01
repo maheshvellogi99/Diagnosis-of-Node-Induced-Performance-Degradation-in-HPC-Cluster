@@ -3,7 +3,7 @@
 **Statistically Guaranteed and Cost-Aware Diagnosis of Node-Induced Performance Degradation in HPC Clusters**
 
 Owner: Mahesh Vellogi (with Vishwesh M, Awhan Ray) · Guide: Dr. K. Nagaraju · IIITDM Kurnool
-Version 1.0 · 9 Oct 2026 · Status: Layers 1–2 specified in full; Layer 3 provisional (papers pending)
+Version 1.0 · 9 Oct 2026 · Status: Layers 1–2 specified in full; Layer 3 per docs/PHASE5_DESIGN.md (Phase 5 merged, D85–D94)
 
 ---
 
@@ -47,8 +47,13 @@ on every node.
    guarantee across hundreds of nodes.
 3. **Shared blame in multi-node jobs.** RUAD treats nodes as independent and leaves
    inter-node dependencies to future work [V: RUAD §4.1].
-4. **Diagnosis cost not optimised.** Telemetry diagnosis assumes data from every node
-   (Tuncer 2019; Aksar 2024). *(Layer 3 papers pending — finalise in Phase 5.)*
+4. **Diagnosis cost not optimised.** Existing diagnosis methods assume 1 Hz telemetry from every node
+   plus labelled anomaly data (F22, F25, F26), and they still confuse CPU, cache and memory-bandwidth
+   causes (F23, F26). Probe-based diagnosis (F24) needs periodic detection probes on all nodes and
+   treats every probe as equally costly. No method we hold starts from scheduler logs only, probes
+   only nodes that a statistically controlled detector ranks as suspects, and chooses probes by
+   information per unit of node time. (Rish uses unit cost; dividing by cost is ours [D]. "Always-on
+   telemetry is expensive per node" is not supported: LDMS uses < 0.1% of a core, F22.)
 5. **Integration missing** — the guide's own SLR: "little work integrates uncertainty-aware
    runtime residuals, multi-job node consensus, and on-demand high-resolution diagnosis" [V: hpc_prisma_slr.docx].
 
@@ -57,7 +62,10 @@ on every node.
 - C2. Anytime-valid per-node evidence (product e-process) plus e-BH selection: the expected fraction
   of healthy nodes among flagged nodes is ≤ α, under any dependence between nodes.
 - C3. Allocation-size weighting that shares blame across a job's nodes while keeping C2 valid.
-- C4. Information-gain-per-cost probe selection for root cause, triggered only by C2.
+- C4. Cost-weighted active probing (information gain ÷ node-seconds) on suspects ranked by Layer 2,
+  where probe results are also e-values that feed the node evidence, with a telemetry probe whose
+  likelihood is the measured confusion matrix of a telemetry classifier, and micro-benchmark probes
+  that separate the classes telemetry confuses.
 - C5. An evaluation protocol with exact ground truth (semi-synthetic injection on real job traces
   + HPAS on a real cluster), released as open data and code.
 
@@ -90,6 +98,11 @@ on every node.
 | F19 | ACI update α_{t+1} = α_t + γ(α − err_t); long-run miscoverage → α for any data sequence; γ = 0.005 in their experiments | Gibbs & Candès eq. (2), Prop. 4.1, §2.1 |
 | F20 | TARE metrics: a_i = min(ŷ_i/y_i, y_i/ŷ_i); A_geo = Π a_i^(c_i/Σc) with c_i = nodes_req × runtime; UnderRate = mean 1[ŷ < y]; keep runtime > 30 s | TARE eq. (2)–(6) |
 | F21 | NodeSentry was evaluated on two private datasets (1,294 and 30 nodes), not public data | NodeSentry §4.1 |
+| F22 | Tuncer et al.: LDMS collects 721 metrics/s per node on Volta (52 nodes); features computed per node "and do not account for the interaction and correlation between multiple nodes"; window W = 45 s, alarm only after C = 5 consistent windows; random forest finds 98% of injected anomalies with 0.08% false alarms; LDMS uses "less than 0.1 percent of a core"; evaluation = 5-fold stratified CV over application runs; in 4-node runs one synthetic anomaly is injected on **one of the four nodes** | Tuncer TPDS 2019, §3.1, §3.4, §4.1, §4.6, §5.1, §5.3, §5.4, §5.11 |
+| F23 | HPAS: 8 user-space anomaly generators (cpuoccupy, cachecopy, membw, memeater, memleak, netoccupy, iometadata, iobandwidth) with intensity knobs; membw uses x86 non-temporal store instructions (MOVNT*); netoccupy uses the SHMEM API; 256 instances of the I/O anomalies caused outages of Voltrino's Lustre filesystem; membw "significantly reduces memory bandwidth" measured by STREAM while cachecopy "has no significant impact on memory bandwidth"; cachecopy, cpuoccupy and membw slow applications most; memleak and memeater "do not visibly affect performance" (no swap; too large → crash); RF diagnosis: "the cachecopy, cpuoccupy, and membw anomalies are sometimes mistaken for each other. This could be due to the lack of metrics representing memory bandwidth"; code at github.com/peaclab/HPAS | Ates et al. ICPP 2019, Table 1, §3.3.3, §3.4, §4 (Figs. 4, 8), §5 (Figs. 9–10) |
+| F24 | Rish et al.: active probing picks the next probe that maximises information gain I(X; T \| previous outcomes) (Fig. 6a, eq. 3); probes are counted, i.e. **unit cost**; detection relies on a small probe set that covers all nodes and runs on a schedule; single-fault assumption and noisy-OR likelihoods in experiments; optimal probe-set selection is NP-hard; active probing used 60–75% fewer probes than pre-planned probing on real applications; dynamics handled with DBNs | Rish et al. TNN 2005, §II–§VII, §VIII, §XI |
+| F25 | Prodigy: VAE trained only on healthy samples; LDMS samples all Eclipse compute nodes at 1 Hz, ≈10 TB/day; HPAS cpuoccupy, cachecopy, membw, memleak used; I/O anomaly runs were terminated by administrators; the network anomaly caused contention only with two-node runs; macro-F1 0.95 (Eclipse) / 0.88 (Volta); anomaly threshold chosen as "the threshold that results in the highest F1-score in the **test** dataset"; output is binary (healthy/anomalous), not the anomaly type | Aksar et al. SC'23, §3, §4.1, §5.1–5.2, §5.4.4, §6.1 |
+| F26 | Aksar et al. (ALBADross runtime): 60-s windows with 15-s skip; 156 node-level metrics after dropping per-core metrics; 6 applications × 5 labels (healthy + 4 HPAS anomalies); the anomaly runs on **every** node of the job; margin-sampling active learning reaches the supervised F1 with far fewer labels (0.78 F1 with 16× fewer samples); cachecopy and membw are the most-queried (most confused) classes; LDMS runs on all 1,488 Eclipse nodes; feature extraction for 1,488 windows × 2,000 features ≈ 28.5 s on one node | Aksar et al. TPDS 2024, Abstract, §IV-B, §IV-C, §IV-E, §V-B (Fig. 5), §V-D |
 
 ### 2.2 Open questions (each is closed by a named phase)
 
@@ -181,7 +194,8 @@ Phase 3 extension (D30, D34): `node_id` nullable (null for user_decoy and system
 | NREL Eagle jobs | Layer 1 development and reproduction | https://data.openei.org/submissions/5860 → `eagle_data.parquet` | 241 MB | **You have it** [V]. Licence CC-BY 4.0 [V]. Cite dataset + Menear et al. |
 | PM100 (Marconi100) | Layers 1 + 2 (has node lists) | https://zenodo.org/records/10127767 → `job_table.parquet`; code https://github.com/francescoantici/PM100-data | 287 MB | Downloading. Licence: check Zenodo page (Q3) |
 | M100 full (Nagios) | Weak real labels for Layer 2 (exploratory) | parent DOI 10.5281/zenodo.7588815; tools https://gitlab.com/ecs-lab/exadata | 30–45 GB per month | **Do not download yet.** Phase 4b only, 1–2 months, Nagios plugin only |
-| Prodigy (Eclipse) | Layer 3 telemetry classifier | 10.5281/zenodo.8079388 | small | You have it (earlier project) |
+| Antarex HPC Fault Dataset | Layer 3 telemetry classifier, Gate 5d (D94) | 10.5281/zenodo.2553224 → `Antarex.zip`, `Readme_Antarex_Dataset.pdf` | about 1.65 GB with Prodigy, download | CC-BY 4.0. Fetched by `scripts/download_data.py` after Mahesh's OK (D93); only CPU/memory blocks extracted |
+| Prodigy artifact (Eclipse) | Secondary binary check only (healthy vs memleak), reported (D94) | 10.5281/zenodo.8079388 → `eclipse_small_prod_dataset.tar`, `fe_eclipse_tsfresh_raw_CHI_2000.json` | see above | CC-BY 4.0. The earlier project's copy is lost; not used (D93) |
 | HPAS | Fault injection (Phase 6) | https://github.com/peaclab/HPAS (BSD-3) | code | Phase 6 |
 | F-DATA (Fugaku) | — | — | — | **Not used**: no node list |
 
@@ -600,19 +614,51 @@ critical event. Report as exploratory; not a primary result.
 
 ---
 
-### Phase 5 — Layer 3 offline (provisional — finalise after Layer 3 papers)
+### Phase 5 — Layer 3 v2: active probing as evidence + cause diagnosis (simulation)
 
-- 5.1 Telemetry classifier: Prodigy data, three classes (healthy / cpuoccupy / memleak);
-  Random Forest (default), Triplet and gated-Triplet as comparisons; grouped CV by job (as in the
-  existing project). Output: class probabilities = likelihood for the "telemetry" probe.
-- 5.2 Probe-selection engine: belief π over causes H; probes A with cost c_a; outcome model
-  P(o | h, a) (discretised outcomes, e.g. benchmark score ratio vs healthy baseline in bins);
-  choose a* = argmax_a [H(π) − E_o H(π | o, a)] / c_a; Bayes update; stop when max π ≥ τ or budget spent.
-  Tests on toy tables where the right first probe is known by hand.
+`docs/PHASE5_DESIGN.md` is the specification (D85), as amended by D86–D94 below. It supersedes
+PROMPT 5 in `docs/PHASE_PROMPTS_5_6.md` and LAYER3_DESIGN.md §3–§4. Everything is labelled
+"simulation, design probe model [A]"; real numbers come from Phase 6.
 
-**Gate 5.** Classifier results reproduced with grouped CV; selection engine passes the toy tests;
-on simulated likelihood tables, the engine reaches the same accuracy as "run all probes" with fewer
-probes (report the number).
+- 5.0 Layer 2 frozen as Rn(1) (D83). v1 (`lr_Sc_a`) stays in every table as "faster, empirical
+  validity only".
+- 5.1 Probe model: a ∈ {cpu, mbw, cache, mem}; healthy log x ~ N(0, σ²), cause h on a node degraded
+  with slowdown s: log x ~ N(k_{h,a} log s, σ²), k table in design §2, σ = 0.05, costs 20/20/20/1 s;
+  telemetry a_tel 60 s, diagnosis only, never in e-values.
+- 5.2 Probe e-values: conformal p against a healthy pool of n_pool = 1000 runs (200 as sensitivity,
+  D87). f_a(p) = (1 − β) + β g_a(p), β = 0.9, g_a = Σ_h π(h | not h0) g_{a,h}: current cause
+  posterior of the investigation (predictable) times per-cause bets built over 2,000 independent
+  pools at s0 = 1.3, on bin edges {0, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1}, each
+  integrating to exactly 1 (D87).
+- 5.3 Combined evidence: multiplying every jumper state by f leaves state proportions unchanged and
+  the jumper update is linear homogeneous, so exactly
+  log E_n(t) = log M_n^{Rn}(t) + Σ_{probes finished by t} log f_a(p). e-BH α = 0.1, m = 980 on E_n.
+  Validity: conditional on the pool, f has mean 1 only if the pool is drawn fresh; a single fixed
+  pool gives E[f | pool] ≠ 1, so the e-value property is marginal over pools. Assumption [A] (D88):
+  the fixed pool is treated as exchangeable with future healthy runs and the marginal statement is
+  what is claimed; redraw-per-base is reported as a sensitivity.
+- 5.4 Diagnosis: joint posterior over (cause, s), uniform over the 6 scenario s values (D89), summed
+  to the 5 hypotheses; prior π0(h0) = 0.5, causes uniform, restarted for each investigation (D90).
+  Next probe = argmax [H(π) − E_x H(π | x, a)] / c_a. Stop at max π ≥ 0.95, all probes used, or
+  budget cut (the investigation ends with what it has, D90).
+- 5.5 Schedule: every 6 h, budget B/4 plus carry-over, available budget capped at one day's budget
+  (answer 2). Nodes in rank order of log E_n. Primary rule (D86): only cleared nodes (π(h0) ≥ 0.95)
+  are excluded for 7 d; other nodes stay eligible in the next block. The design rule (every
+  investigated node excluded 7 d) is a sensitivity row.
+- 5.6 Baselines P-all (all five probes, 121 s), P-IG, P-random, P-randnode, P-sweep; B ∈ {60, 300,
+  1800} node-s/day, and B = 0 is Layer 2 alone. Our policy also at B = 7200 (D91).
+- 5.7 Telemetry likelihood: out-of-fold confusion matrix of a Random Forest on Antarex (D94).
+  Its transfer to PM100 nodes is an assumption [A].
+
+**Gate 5** (pre-registered; design §7, 5d replaced by D94).
+- 5a validity (binding): B = 300, null P(ever) ≤ α + 2 SE on the 200 old null bases; decoy and shock
+  P(ever) ≤ α + 2 SE (80 each, pooled over s).
+- 5b speed: K = 1%, s = 1.3, B = 300: KM P(flag ≤ 14 d) ≥ 0.8 [D target; report honestly if missed].
+- 5c diagnosis: top-1 cause accuracy ≥ 0.9 among flagged degraded nodes (design table, σ = 0.05),
+  with mean node-seconds per investigation ≤ 72.6 s (0.6 × P-all's 121 s).
+- 5d telemetry classifier (D94): RF on Tuncer-style statistical features over 60-s windows from the
+  Antarex CPU/memory blocks, classes healthy, dial → cpu, ddot → cache, memeater → mbw, leak → mem,
+  split by contiguous time blocks or runs, never random windows: macro-F1 ≥ 0.90 [D].
 
 ---
 
@@ -672,6 +718,9 @@ end, status, key metrics. Reports cite run ids.
 | Straggler contamination: a healthy node sharing jobs with a degraded node sees late jobs, so its per-node null is violated (D72) | Guarantee not claimed with degraded nodes present; co-allocated false flags measured separately. D71 blame allocation did not reduce them on the development pilot and is rejected (D75) |
 | Real Mode P p-values are marginally but not conditionally calibrated: temporal clustering (autocorrelation of 1{p < 0.1} = 0.29, 0.20, 0.06 at lags 1, 10, 100) breaks the condition behind the e-process guarantee, even under the global null (D76) | Gate 4a on the real p-value trace is the evidence, stated as empirical; v1 passes it partly because w_j = 1/\|N_j\| dilutes bursts, so designs that concentrate bets must be re-checked on real nulls (D71: 0.300 ± 0.032 vs 0.035 on iid p-values). Details in reports/phase_4b.md |
 | Relative e-values (D78) rely on placement being exchangeable within a partition and block: true by construction on the random base, an assumption [A] on the real placement | Validity results are on the random base; on the real base flags are reported as unknown truth, with placement concentration per flagged node (D84) |
+| Probe e-values use one fixed healthy pool, so E[f \| pool] ≠ 1 and repeated probes share it: the e-value property holds marginally over pools only (D88) | Assumption [A]: the pool is exchangeable with future healthy probe runs. E[f \| pool] over 2,000 pools and its value for the pool used are reported; redraw-per-base sensitivity |
+| Nodes 460, 480, 481, 500 are flagged by Rn(1) on real placement (D84) and are user-dominated: top-user share above q90 of all nodes, 7–12 users. Likely placement effects that break exchangeability [A] (D92) | They are the motivating case for Layer 3: a probe measures the node, not the user. No simulated claim about them, because the simulation has no model of what these nodes are |
+| Antarex telemetry classifier transferred to PM100 nodes (D94) | Assumption [A]: different hardware, applications and metrics. The confusion matrix is a design input for a_tel, never used in e-values; Phase 6 replaces it |
 | Injection model too simple (straggler assumption) | "partial" variant; Phase 6 real injections |
 | PM100 contains only exclusive jobs | state as limitation; shared-node jobs future work |
 | PM100 has no job name, so baseline B1 drops the "≥ 3 applications" condition (D13) | state as limitation; B1 on PM100 is weaker than the guide's rule as written |
@@ -820,3 +869,12 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D83 | 1 Nov 2026 | Adopt the Rn denominator (mean of node means over active nodes; exact for any job sizes). Layer 2 for Phase 5 = Rn(1). v1 (lr_Sc_a) stays in every table as \"faster, empirical validity only\". R (pair-weighted) retired. The architect's D78 proof was wrong: the uniform-draw argument fails for mixed job sizes (PLAN Phase 4.1) | Mahesh |
 | D84 | 1 Nov 2026 | Real-placement check of Rn(1), development only: real-base null P(ever), flagged nodes with first-flag dates, overlap with the Phase 2 exploratory list (840, 287, 841, 80, 309, 81, 441, 42, 679, 40) and with Phase 4's 9 real-null flags under v1, and per flagged node the share of its jobs from its single top user. Exploratory, unknown truth | Mahesh |
 | D85 | 1 Nov 2026 | Commit docs/PHASE5_DESIGN.md (docs only). It supersedes PROMPT 5 in docs/PHASE_PROMPTS_5_6.md and LAYER3_DESIGN.md §3–§4; LAYER3_DESIGN §1–§2 and §5 still stand | Mahesh |
+| D86 | 2 Nov 2026 | PRIMARY investigation rule: only cleared nodes (π(h0) ≥ 0.95) are excluded for 7 d; nodes not cleared stay eligible in the next block. The rule as written in the design (every investigated node excluded 7 d) becomes a sensitivity row. Gate 5b unchanged. Decided before any result | Mahesh |
+| D87 | 2 Nov 2026 | Probe bets with resolution near 0: bin edges {0, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1}; β = 0.9 (was 0.5); n_pool = 1000 main, 200 sensitivity. Per-cause bets g_{a,h} built over 2,000 independent pools at s0 = 1.3, each integrating to exactly 1. Bet for a probe = Σ_h π(h \| not h0) g_{a,h} with the investigation's current cause posterior (predictable). Before the grid report healthy and per-cause log-growth per probe for s ∈ {1.1, 1.2, 1.3, 1.5, 2.0, 3.0} and E[f \| pool] over 2,000 pools (sd, q95, value for the fixed pool). STOP if healthy growth > 0 for any probe | Mahesh |
+| D88 | 2 Nov 2026 | Fixed pool is main, redraw-per-base is a sensitivity; assumption [A] stated in PLAN Phase 5 and §12 | Mahesh |
+| D89 | 2 Nov 2026 | Diagnosis posterior is joint over (cause, s), uniform over the 6 scenario s values | Mahesh |
+| D90 | 2 Nov 2026 | Each investigation starts from π0; a node's output is its latest investigation; a flagged degraded node never investigated counts as wrong and is also reported separately; budget-cut investigations end with what they have; misspecification pools use the true σ | Mahesh |
+| D91 | 2 Nov 2026 | B = 7200 node-s/day added to our policy's grid (baselines stay at {60, 300, 1800}). Report the smallest B in the grid at which KM P(flag ≤ 14 d) at K = 1%, s = 1.3 reaches 0.8, if any | Mahesh |
+| D92 | 2 Nov 2026 | D84 recorded in §12: nodes 460, 480, 481, 500 are user-dominated, likely placement effects that break exchangeability [A]; motivating case for Layer 3; no simulated claim about them | Mahesh |
+| D93 | 2 Nov 2026 | Datasets: extend scripts/download_data.py to fetch and md5-verify Antarex (10.5281/zenodo.2553224, CC-BY 4.0) and the Prodigy artifact (10.5281/zenodo.8079388, CC-BY 4.0) into data/raw/antarex/, data/raw/prodigy/, after Mahesh's OK; SHA-256 in CHECKSUMS.txt; extract only the CPU/memory blocks needed; data cards antarex.md and prodigy.md; STOP if a checksum fails. The earlier project's Prodigy data is lost and not used | Mahesh |
+| D94 | 2 Nov 2026 | Gate 5d redefined before any result: RF on Tuncer-style statistical features over 60-s windows (F22, F26) from Antarex CPU/memory blocks, classes healthy, dial → cpu, ddot → cache, memeater → mbw, leak → mem (cpufreq, pagefail, ioerr, copy reported but excluded from the H mapping); split by contiguous time blocks or runs, never random windows; macro-F1 ≥ 0.90 [D], reported next to Netti et al.'s published RF F-score 0.98 (arXiv 2007.14241, figure given by Mahesh, not checked against the paper here) as context. Out-of-fold confusion matrix = a_tel likelihood (diagnosis only, never in e-values); transfer to PM100 is an assumption [A]. Prodigy artifact = secondary binary check, reported only | Mahesh |

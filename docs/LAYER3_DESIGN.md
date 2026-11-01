@@ -1,8 +1,7 @@
 # LAYER3_DESIGN.md — Layer 3 (Phases 5–6), finalised after reading the Layer 3 papers
 
 Author: senior architect (chat), 9 Oct 2026. Status: **approved design, not yet merged into PLAN.md.**
-When Phase 5 starts, Claude Code merges §1 into PLAN §2.1 (as F22–F26), §2 into PLAN §1.3/§1.4,
-and §3–§5 into PLAN §9 Phases 5–6, then records the merge as a decision. Until then this file is the source.
+**Merged 2 Nov 2026:** §1 is PLAN §2.1 F22–F26, §2 is PLAN §1.3/§1.4; §3–§4 superseded by PHASE5_DESIGN.md (D85), §5 still stands.
 
 Tags as in PLAN §0: **[V]** verified in a paper we hold (section given) · **[D]** our design choice · **[A]** assumption to test.
 
