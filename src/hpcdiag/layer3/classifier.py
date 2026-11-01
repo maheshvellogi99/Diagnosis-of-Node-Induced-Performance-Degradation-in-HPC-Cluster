@@ -16,6 +16,7 @@ import time
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.csv as pacsv
 from scipy.stats import kurtosis, skew
 from sklearn.ensemble import RandomForestClassifier
@@ -104,10 +105,12 @@ def per_core_groups(cols: list[str]) -> tuple[dict[str, list[str]], list[str]]:
 def load_metrics(path, t0: int, n: int) -> tuple[np.ndarray, list[str]]:
     """One LDMS csv as per-second metrics: system-wide columns, and for per-core metrics the sum and
     the maximum over cores. Counters become per-second differences."""
-    tb = pacsv.read_csv(
-        path, convert_options=pacsv.ConvertOptions(strings_to_null=True, null_values=["", "-"])
-    )
-    cols = [c for c in tb.column_names if c not in ID_COLS]
+    tb = pacsv.read_csv(path)
+    cols = [
+        c.name
+        for c in tb.schema
+        if c.name not in ID_COLS and (pa.types.is_integer(c.type) or pa.types.is_floating(c.type))
+    ]
     t = tb.column("#Time").to_numpy()
     groups, plain = per_core_groups(cols)
     names, arrs = [], []
