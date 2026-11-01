@@ -34,12 +34,16 @@ def delta(pc, cause, probe, s):
     return pc["k"][cause][probe] * np.log(s)
 
 
-def build_bet(pc, ec, probe, pool, rng):
+def build_bet(pc, ec, probe, rng):
+    """g_a averaged over independent pools, so g does not depend on the pool that is scored."""
+    n_pools = ec["bet_pools"]
+    n = ec["bet_draws"] // len(ec["bet_causes"]) // n_pools
     ps = []
-    n = ec["bet_draws"] // len(ec["bet_causes"])
-    for c in ec["bet_causes"]:
-        x = rng.normal(delta(pc, c, probe, ec["bet_s0"]), pc["sigma"], n)
-        ps.append(pvals(x, pool, rng))
+    for _ in range(n_pools):
+        pool = rng.normal(0, pc["sigma"], ec["n_pool"])
+        for c in ec["bet_causes"]:
+            x = rng.normal(delta(pc, c, probe, ec["bet_s0"]), pc["sigma"], n)
+            ps.append(pvals(x, pool, rng))
     h = np.histogram(np.concatenate(ps), bins=ec["bins"], range=(0, 1))[0].astype(float)
     return h / h.mean()
 
@@ -96,7 +100,7 @@ def _run(run: Run, config_path: str) -> int:
     rng = np.random.default_rng(cfg["seed"])
     sig, n_pool, beta = pc["sigma"], ec["n_pool"], ec["beta"]
     pools = {a: rng.normal(0, sig, n_pool) for a in pc["names"]}
-    bets = {a: build_bet(pc, ec, a, pools[a], rng) for a in pc["names"]}
+    bets = {a: build_bet(pc, ec, a, rng) for a in pc["names"]}
     rows = []
     for a in pc["names"]:
         g = bets[a]
@@ -114,7 +118,7 @@ def _run(run: Run, config_path: str) -> int:
         rows.append(row)
     t = pd.DataFrame(rows)
     pool_rows = []
-    for a in ("cpu", "mbw", "cache"):
+    for a in pc["names"]:
         v = np.array(
             [
                 cond_mean_f(bets[a], beta, rng.normal(0, sig, n_pool), sig)

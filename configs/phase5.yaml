@@ -19,7 +19,8 @@ evalue:                                  # §3
   bet_s0: 1.3
   bet_causes: [cpu, cache, mbw]
   bins: 20
-  bet_draws: 200000
+  bet_draws: 600000
+  bet_pools: 2000                        # g_a is built over independent pools, not the scored pool
 
 budget_check:                            # planning numbers only; development seeds
   pool_draws: 2000
