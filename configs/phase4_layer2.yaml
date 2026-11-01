@@ -80,3 +80,15 @@ pilot4b:                                  # D73 development pilot (v1 vs D71)
   K_pct: 1
   s: [1.3, 2.0, 3.0]
   seeds: [0, 1, 2, 3, 4]
+
+relative:                                 # D78, D79: name -> [denominator, lambda]
+  R1: [pair, 1.0]                         # D78 as specified
+  R025: [pair, 0.25]
+  Rn1: [node, 1.0]                        # node-weighted denominator: proposed, not adopted
+  Rn025: [node, 0.25]
+
+pilot4c:                                  # D81 (b), (c); development seeds only
+  K_pct: 1
+  s: [1.3, 2.0, 3.0]
+  seeds: [0, 1, 2, 3, 4]
+  decoy_kinds: [user_decoy, user_decoy_heavy, system_shock]

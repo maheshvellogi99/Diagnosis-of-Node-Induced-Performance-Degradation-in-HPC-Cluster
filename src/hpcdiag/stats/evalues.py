@@ -207,3 +207,58 @@ def blame_logM(
             total[nd[s]] = log_total(logC[nd[s]])
             out[idx[s]] = total[nd[s]]
     return out, lam
+
+
+def relative_evalues(
+    block: np.ndarray,
+    part: np.ndarray,
+    node: np.ndarray,
+    f: np.ndarray,
+    m: int,
+    denom: str = "pair",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Relative e-values (D78). One row per pair (job, node); `f` (n, K) = bet values at p_j.
+
+    For each (block, node) with at least one pair: e = (mean of f over the node's pairs) / fbar,
+    with fbar taken over the block and the node's partition only:
+      denom = "pair": pair-weighted mean over all pairs (D78 as specified);
+      denom = "node": mean of the node means over the partition's nodes with a pair in the block.
+    A block whose fbar is 0 has every f = 0 and gets e = 1. Returns (block, node, e) sorted by
+    (block, node); nodes without a pair in a block have no row."""
+    if denom not in ("pair", "node"):
+        raise ValueError("denom must be 'pair' or 'node'")
+    uk, inv = np.unique(np.asarray(block, np.int64) * m + node, return_inverse=True)
+    count = np.bincount(inv)
+    K = f.shape[1]
+    a = np.column_stack([np.bincount(inv, weights=f[:, k]) / count for k in range(K)])
+    b_row, n_row = uk // m, uk % m
+    q_row = np.empty(len(uk), np.int64)
+    q_row[inv] = part
+    nq = int(np.max(part)) + 1
+    ug, ginv = np.unique(b_row * nq + q_row, return_inverse=True)
+    if denom == "pair":
+        pg = ginv[inv]
+        c = np.bincount(pg, minlength=len(ug))
+        den = np.column_stack(
+            [np.bincount(pg, weights=f[:, k], minlength=len(ug)) / c for k in range(K)]
+        )
+    else:
+        c = np.bincount(ginv, minlength=len(ug))
+        den = np.column_stack(
+            [np.bincount(ginv, weights=a[:, k], minlength=len(ug)) / c for k in range(K)]
+        )
+    d = den[ginv]
+    e = np.ones_like(a)
+    ok = d > 0
+    e[ok] = a[ok] / d[ok]
+    return b_row, n_row, e
+
+
+def relative_logM(node: np.ndarray, e: np.ndarray, lam: float, J: float) -> np.ndarray:
+    """log M after each relative update: every jumper state, M <- M (1 + lam (e - 1)) (D78). `lam`
+    is one constant in (0, 1], fixed in advance. Rows in (block, node) order."""
+    if np.ndim(lam) != 0 or not 0 < lam <= 1:
+        raise ValueError("lambda must be one constant in (0, 1]")
+    with np.errstate(divide="ignore"):
+        lb = np.log1p(lam * (e - 1.0))
+    return node_logM_by_rank(node, lb, J)

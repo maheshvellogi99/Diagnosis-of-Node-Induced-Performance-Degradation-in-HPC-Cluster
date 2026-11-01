@@ -17,6 +17,8 @@ from hpcdiag.stats.evalues import (
     log_bet_funcs,
     log_total,
     node_logM_by_rank,
+    relative_evalues,
+    relative_logM,
 )
 
 H_NS = 3600 * 10**9
@@ -126,6 +128,40 @@ def node_evidence_blame(
     m = int(pairs["node_id"].max()) + 1
     lm, lam = blame_logM(pk[use], end, node, g, J, m)
     return pd.DataFrame({"node_id": node, "end_ns": end, "logM": lm, "lam": lam})
+
+
+def block_grid(eval_ns: np.ndarray, first_end_ns: int) -> np.ndarray:
+    """Block ends for D78: the e-BH evaluation times, extended backwards at the same step so that
+    jobs ending before the first evaluation also fall in 6-h blocks. A block is (t_{b-1}, t_b]."""
+    step = int(eval_ns[1] - eval_ns[0])
+    back = max(0, int(np.ceil((eval_ns[0] - first_end_ns) / step)))
+    return np.r_[eval_ns[0] - step * np.arange(back, 0, -1), eval_ns]
+
+
+def node_evidence_relative(
+    pairs: pd.DataFrame,
+    p_job: np.ndarray,
+    part_job: np.ndarray,
+    bets,
+    J: float,
+    lam: float,
+    grid: np.ndarray,
+    denom: str = "pair",
+) -> pd.DataFrame:
+    """D78: one update per (block, node with a pair in the block), dated at the block end. Pairs
+    without a p-value and jobs ending after the last block do not count. Same output columns as
+    node_evidence. A node must belong to one partition only."""
+    pk = pairs["k"].to_numpy()
+    pj = p_job[pk]
+    block = np.searchsorted(grid, pairs["end_ns"].to_numpy(), side="left")
+    use = np.isfinite(pj) & (block < len(grid))
+    pu, q, node = pj[use], part_job[pk[use]], pairs["node_id"].to_numpy()[use]
+    if len(np.unique(np.c_[node, q], axis=0)) != len(np.unique(node)):
+        raise ValueError("a node appears in more than one partition")
+    f = np.column_stack([g(pu) for g in bets])
+    m = int(pairs["node_id"].max()) + 1
+    b, nd, e = relative_evalues(block[use], q, node, f, m, denom)
+    return pd.DataFrame({"node_id": nd, "end_ns": grid[b], "logM": relative_logM(nd, e, lam, J)})
 
 
 def snapshots(

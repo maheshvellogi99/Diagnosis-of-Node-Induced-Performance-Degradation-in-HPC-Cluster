@@ -8,6 +8,7 @@ Variant sets (D58):
   (b); B6 sensitivity (Mode P W = 1 d, 365 d, Mode E as-run; jumper, no guard); baselines B1-B5.
 - "primary": jumper with guard none, (a), (b); baselines B1-B5.
 - "compare4b": v1 lr_Sc_a (w = 1/|N_j|) vs v2 lr_Sc_a_blame (D71), no baselines (D73, D74).
+- "compare4c": v1, v1 with w = 1, relative e-values R (D78) and Rn (node-weighted denominator).
 Every variant uses e-BH with fixed m (D50) at alpha (and the alpha curve) every 6 h.
 """
 
@@ -38,7 +39,9 @@ G: dict = {}  # per-process globals (filled by _init)
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--mode", choices=["pilot", "pilot2", "full", "pilot4b"], required=True)
+    ap.add_argument(
+        "--mode", choices=["pilot", "pilot2", "full", "pilot4b", "pilot4c"], required=True
+    )
     ap.add_argument("--workers", type=int, default=7)
     a = ap.parse_args()
     run = start_run("phase4", a.config, tag=a.mode)
@@ -125,7 +128,7 @@ def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dic
     t0 = time.time()
     ps["P7_a"] = P.mode_p(pop, l1["window_hours"], l1["min_ref"], l1["guard_a_hours"])
     t["modeP7_guard_a"] = time.time() - t0
-    if variant_set in ("pilot2", "primary2", "ablation2", "compare4b"):
+    if variant_set in ("pilot2", "primary2", "ablation2", "compare4b", "compare4c"):
         t0 = time.time()
         pop = P.add_centred(pop, l1["centre_window_hours"], l1["centre_min_n"])
         ps["Sc"] = P.mode_p_on(pop, "score_c", l1["window_hours"], l1["min_ref"])
@@ -151,6 +154,12 @@ def _layer1(jobs_mat: pd.DataFrame, variant_set: str) -> tuple[pd.DataFrame, dic
 def _variants(variant_set: str) -> list[tuple[str, str, str, float | None, bool, str]]:
     """(name, p key, guard, J, decoy weight, bet: 'kappa' or a key of G['bets'])."""
     J = G["cfg"]["layer2"]["jumper_J"]
+    if variant_set == "compare4c":  # D79 + Rn; names in cfg["relative"] select D78
+        return [
+            ("lr_Sc_a", "Sc_a", "a", J, False, "Sc_a"),
+            ("lr_Sc_a_w1", "Sc_a", "a", J, False, "Sc_a"),
+            *[(n, "Sc", "none", J, False, "Sc") for n in G["cfg"]["relative"]],
+        ]
     if variant_set == "compare4b":  # D73/D74; the _blame suffix selects D71
         return [
             ("lr_Sc_a", "Sc_a", "a", J, False, "Sc_a"),
@@ -277,7 +286,14 @@ def _process(task: tuple[str, str]) -> dict:
                 frozen[pkey] = A.guard_b_frozen(p, end_ns, gb["J"], gb["ratio"])
             fz = frozen[pkey]
         bets = lc["kappas"] if bet == "kappa" else G["bets"][bet]
-        if name.endswith("_blame"):
+        if vset == "compare4c" and name in cfg["relative"]:
+            denom, lam = cfg["relative"][name]
+            part = pd.factorize(pop["partition"].astype(str))[0]
+            grid = A.block_grid(eval_ns, int(end_ns.min()))
+            ev = A.node_evidence_relative(pairs, p, part, bets, J, lam, grid, denom)
+        elif name == "lr_Sc_a_w1":
+            ev = A.node_evidence(pairs, p, np.ones(len(w_base)), bets, J, fz)
+        elif name.endswith("_blame"):
             ev = A.node_evidence_blame(pairs, p, bets, J, fz)
         else:
             ev = A.node_evidence(pairs, p, w_decoy if dw else w_base, bets, J, fz)
@@ -299,7 +315,7 @@ def _process(task: tuple[str, str]) -> dict:
             out["lambda_degraded"] = _lambda_stats(ev, pairs, p, w_base, truth)
         res["variants"][name] = out
         T["variants"][name] = time.time() - t0
-    if vset == "compare4b":  # no baselines (D73, D74)
+    if vset in ("compare4b", "compare4c"):  # no baselines (D73, D74, D81)
         T["baselines"] = 0.0
         T["total"] = time.time() - t_all
         res["timing_s"] = T
@@ -492,6 +508,21 @@ def _tasks_pilot4b(cfg: dict) -> list[tuple[str, str]]:
     return t
 
 
+def _tasks_pilot4c(cfg: dict) -> list[tuple[str, str]]:
+    """D81 (b) and (c). Reads the Phase 3 index only; a sealed seed (D77) raises."""
+    pc = cfg["pilot4c"]
+    t = [
+        f"node__rand{k:02d}__K{pc['K_pct']}__s{s}__seed{k:02d}"
+        for s in pc["s"]
+        for k in pc["seeds"]
+    ]
+    idx = pd.read_parquet(resolve(cfg["data"]["scenarios"]) / "index.parquet")
+    sel = idx[idx["kind"].isin(pc["decoy_kinds"]) & (idx["base"] != "real")]
+    if sel["seed"].max() > 19:
+        raise RuntimeError("sealed seeds in the task list (D77)")
+    return [(sid, "compare4c") for sid in t + sel["scenario_id"].tolist()]
+
+
 def _pilot2_diagnostics(cfg: dict, log) -> dict:
     """D59 paired check (raw S and S_c) and D62 detectability table, in the main process."""
     from hpcdiag.layer2.power import detectability, paired_check
@@ -551,6 +582,7 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
         "pilot2": _tasks_pilot2,
         "full": _tasks_full,
         "pilot4b": _tasks_pilot4b,
+        "pilot4c": _tasks_pilot4c,
     }[mode](cfg)
     diag = _pilot2_diagnostics(cfg, log) if mode in ("pilot2", "full") else None
     log.info("%d tasks, %d workers", len(tasks), workers)

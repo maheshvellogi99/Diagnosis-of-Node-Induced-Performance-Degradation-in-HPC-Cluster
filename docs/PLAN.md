@@ -510,6 +510,35 @@ n ∈ N_j:
   block). It is predictable, and valid on iid p-values (null P(ever) 0.035), but it raises null
   P(ever) to 0.300 ± 0.032 on the real trace. v1 (lr_Sc_a, w_j = 1/|N_j|) remains the Layer-2
   configuration. No λ caps, batching or other tuning of D71 (D75).
+- **Relative (cross-sectional) e-values (D78, Phase 4c, development only).** Blocks are the 6-h
+  e-BH evaluation intervals; a job belongs to the block in which it ends. For block b, partition q
+  and each bet f (each jumper state's g_s0):
+
+    f̄_{b,q} = average of f(p_j) over all pairs (j, n') with j ending in b and n' in q;
+    e_{n,b} = (mean of f(p_j) over node n's pairs in b) / f̄_{b,q}.
+
+  Each jumper state updates M ← M (1 + λ (e_{n,b} − 1)), with λ a constant fixed in advance; nodes
+  with no pair in b are not updated. Jumper (J = 0.01, same states and bets) and e-BH (α = 0.1,
+  m = 980) are unchanged. Scores: S_c, Mode P W = 7 d, no guard (a). Variants R(1), R(0.25) (D79).
+- **Validity of D78: the proof as first specified does not hold (found by the D80(1) enumeration).**
+  The specified argument was that node n's pairs are a uniform draw from the block's pairs in its
+  partition, so E[e_{n,b} | …] = 1. That is true when all jobs in the block have the same |N_j|. It
+  is false for mixed sizes, because job size enters through the number of pairs K_n. Exact
+  counterexample, 3 nodes, job A size 1, job B size 2, drawn as in the random base: f_A = 3, f_B = 0
+  gives mean update 8/9; f_A = 0, f_B = 3 gives 19/18 > 1. So R(λ) with the pair-weighted f̄ is
+  not an e-process under the global null. How far it drifts is measured in reports/phase_4c.md.
+- **Candidate correction, NOT adopted (Rn, awaiting Mahesh's decision; changes a D78 formula).**
+  Replace f̄_{b,q} by a_{b,q} = the mean of a_{n,b} over the nodes of q with a pair in b, where
+  a_{n,b} = mean of f(p_j) over n's pairs. It equals f̄_{b,q} when every active node has one pair.
+  Proof. Assume the global null and placement independent of p-values, with each job's node set
+  uniform within its partition, independently across jobs (true by construction on the random base).
+  Fix all p-values and sizes of the whole trace, all placements before b, and block b's placement
+  up to a relabelling of the nodes of q. A uniform relabelling leaves the law of the placement
+  unchanged, so given that n has a pair in b, n is uniform over the A active positions. The values
+  a_{n,b} / a_{b,q} sum to A over those positions, so E[e_{n,b} | …] = 1 for every f, whatever the
+  temporal dependence (if a_{b,q} = 0 then all f = 0 and e = 1). Each jumper state's update has mean
+  1 and the mixing step conserves capital, so M_n is an e-process over blocks and the stopping-time
+  argument of 4.3 applies. On the real placement this exchangeability is an assumption [A] (§12).
 - Work in log space: log M (avoid overflow).
 - Per-node job order (D14): jobs are applied to M_n in `end_time` order, ties broken by `row_id`.
   Same-node overlaps ≤ 60 s (Phase 0: max 19 s) are treated as non-overlapping. The PM100
@@ -639,6 +668,7 @@ end, status, key metrics. Reports cite run ids.
 | Node placement correlated with lateness (e.g. certain users on certain racks) | Mondrian by user; check per-node p-value uniformity on clean data (Gate 4a) |
 | Straggler contamination: a healthy node sharing jobs with a degraded node sees late jobs, so its per-node null is violated (D72) | Guarantee not claimed with degraded nodes present; co-allocated false flags measured separately. D71 blame allocation did not reduce them on the development pilot and is rejected (D75) |
 | Real Mode P p-values are marginally but not conditionally calibrated: temporal clustering (autocorrelation of 1{p < 0.1} = 0.29, 0.20, 0.06 at lags 1, 10, 100) breaks the condition behind the e-process guarantee, even under the global null (D76) | Gate 4a on the real p-value trace is the evidence, stated as empirical; v1 passes it partly because w_j = 1/\|N_j\| dilutes bursts, so designs that concentrate bets must be re-checked on real nulls (D71: 0.300 ± 0.032 vs 0.035 on iid p-values). Details in reports/phase_4b.md |
+| Relative e-values (D78) rely on placement being exchangeable within a partition and block: true by construction on the random base, an assumption [A] on the real placement | Evaluated on the random base only so far (Phase 4c); the real base is not evaluated |
 | Injection model too simple (straggler assumption) | "partial" variant; Phase 6 real injections |
 | PM100 contains only exclusive jobs | state as limitation; shared-node jobs future work |
 | PM100 has no job name, so baseline B1 drops the "≥ 3 applications" condition (D13) | state as limitation; B1 on PM100 is weaker than the guide's rule as written |
@@ -779,3 +809,8 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D75 | 31 Oct 2026 | D71 (predictable blame allocation) is rejected. On the real trace it raises null P(ever) to 0.300 ± 0.032, while on iid p-values it is 0.035: Mode P p-values are marginally but not conditionally calibrated (bursts; lag-1 autocorrelation of 1{p < 0.1} = 0.29). v1 (lr_Sc_a) remains the Layer-2 configuration. No λ caps, batching or other tuning of D71 | Mahesh |
 | D76 | 31 Oct 2026 | Recorded as a result, not a footnote: (i) the per-node e-process guarantee needs p-values that are valid given the past, and real Mode P p-values violate this through temporal clustering; (ii) v1 passes Gate 4a empirically partly because w = 1/\|N_j\| dilutes bursts; (iii) report the diagnostic table (real / iid / shuffled / shuffled within job size) for v1 and v2, the autocorrelation of 1{p < 0.1} at lags 1, 10, 100, and the dates of the null flags. Added to PLAN Phase 4.1 and §12 | Mahesh |
 | D77 | 31 Oct 2026 | Fresh seeds 20–39 and nulls 200–399 stay sealed: nothing runs on them until the final system (Layer 2 v1 + Phase 5 active probing) is frozen. Replaces the D74 run. Disclosed: bases 20–39 were already used as null bases in Phase 4 | Mahesh |
+| D78 | 1 Nov 2026 | Relative e-values: blocks = 6-h e-BH intervals, jobs assigned to the block in which they end; f̄_{b,q} = pair-weighted mean of f(p_j) in block b and partition q; e_{n,b} = mean of f over node n's pairs / f̄_{b,q}; nodes with no pairs not updated; M ← M (1 + λ (e_{n,b} − 1)), λ fixed in advance; jumper J = 0.01, same states and bets; e-BH α = 0.1, m = 980; S_c, Mode P W = 7 d, no guard (a). Note: the validity proof as specified fails for mixed job sizes (D80(1) enumeration, PLAN Phase 4.1); corrected denominator proposed, not adopted | Mahesh |
+| D79 | 1 Nov 2026 | Variants R(λ = 1) and R(λ = 0.25). References: v1 (lr_Sc_a) and v1 with w = 1 from Phase 4b. No other parameters | Mahesh |
+| D80 | 1 Nov 2026 | Tests first: exact enumeration of block placements; simulation with bursts under random placement; means per partition using block-b jobs only; λ fixed in advance, nodes with no pairs not updated | Mahesh |
+| D81 | 1 Nov 2026 | Development evaluation only: (a) null diagnostic on 200 old bases for R(1), R(0.25), v1, v1 w = 1; (b) dev pilot seeds 0–4, node, K = 1%, s ∈ {1.3, 2.0, 3.0}, random base; (c) user_decoy, user_decoy_heavy, system_shock, random base, seeds 0–19: P(ever) | Mahesh |
+| D82 | 1 Nov 2026 | Sealing unchanged (D77). reports/phase_4c.md | Mahesh |
