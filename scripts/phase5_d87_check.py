@@ -12,17 +12,17 @@ import numpy as np
 import pandas as pd
 
 from hpcdiag.layer3 import d87 as D
-from hpcdiag.layer3 import evalue as EV
 from hpcdiag.layer3 import probes as PR
+from hpcdiag.layer3 import setup as ST
 from hpcdiag.utils.run import Run, run_guarded, start_run
 
 
 def one(cfg: dict, n_pool: int) -> dict:
-    ec = {**cfg["evalue"], "n_pool": n_pool}
+    ec = cfg["evalue"]
     m = PR.from_config(cfg["probes"])
-    bets = EV.build_bets(m, ec, np.random.default_rng([cfg["seed"], n_pool]))
-    rng = np.random.default_rng([ec["pool_seed"], n_pool])
-    pools = {a: np.sort(rng.normal(0, m.sigma, n_pool)) for a in m.names}
+    bets = ST.make_belief(cfg, ST.Variant(n_pool=n_pool)).bets
+    fp = ST.fixed_pools(m.names, m.sigma, n_pool, [ec["pool_seed"], n_pool])
+    pools = dict(zip(m.names, fp, strict=True))
     g = D.growth_table(m, bets, pools, cfg["policy"]["s_grid"])
     p = D.pool_table(m, bets, pools, n_pool, ec["bet_pools"], np.random.default_rng(n_pool + 1))
     return {"growth": g, "pool": p, "G_bin1": bets.G[:, :, 0].tolist()}

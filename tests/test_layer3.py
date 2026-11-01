@@ -517,3 +517,47 @@ def test_diagnosis_table_rules():
     assert t[0]["correct"] and t[0]["cause_out"] == "mbw"  # latest after onset
     assert not t[1]["investigated"] and not t[1]["correct"]  # before onset only: wrong (D90)
     assert not t[2]["investigated"]
+
+
+# ------------------------------------------------------------------ runner
+
+
+def test_sealed_seeds_raise():
+    from hpcdiag.layer3.run_phase5 import check_sealed
+
+    check_sealed(["null__rand199", "node__rand19__K1__s1.3__seed19", "null__real"])
+    check_sealed(["user_decoy__rand03__s2.0__seed19"])
+    with pytest.raises(RuntimeError):
+        check_sealed(["node__rand20__K1__s1.3__seed20"])
+    with pytest.raises(RuntimeError):
+        check_sealed(["null__rand200"])
+
+
+def test_runner_does_not_read_the_fresh_index():
+    from pathlib import Path
+
+    import hpcdiag.layer3.run_phase5 as RP
+
+    assert "index_fresh" not in Path(RP.__file__).read_text()
+
+
+def test_misspec_pool_uses_true_sigma():
+    from hpcdiag.layer3 import setup as ST
+    from hpcdiag.utils.run import load_config
+
+    cfg = load_config("configs/phase5.yaml")
+    v = ST.VARIANTS["misspec"]
+    w = ST.make_world(cfg, v, 1.3, np.zeros(3, int), np.zeros(3, int), 1, 2)
+    assert w.sigma == 0.1
+    assert 0.09 < w.pools[0].std() < 0.11
+    bel = ST.make_belief(cfg, v)
+    assert bel.sigma == 0.05
+
+
+def test_telemetry_rows_smoothed():
+    from hpcdiag.layer3 import setup as ST
+
+    c = np.diag([8, 8, 8, 8, 8]).tolist()
+    r = ST.telemetry_rows({"telemetry": {"counts": c}})
+    assert np.allclose(r.sum(axis=1), 1) and (r > 0).all()
+    assert r[0, 0] == pytest.approx(9 / 13)

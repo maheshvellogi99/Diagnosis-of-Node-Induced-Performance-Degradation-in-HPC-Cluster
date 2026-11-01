@@ -1,4 +1,4 @@
-"""D87 checks, reported before the grid: log-growth per probe and E[f | pool], exact given a pool."""
+"""D87 checks before the grid: log-growth per probe and E[f | pool], exact given a pool."""
 
 from __future__ import annotations
 
