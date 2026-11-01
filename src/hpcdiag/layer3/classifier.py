@@ -136,7 +136,7 @@ def build_features(cfg: dict, log) -> tuple[np.ndarray, pd.DataFrame, list[str]]
     Xs, metas, names_ref = [], [], None
     for block in a["blocks"]:
         d = resolve(block["dir"])
-        lab = pd.read_csv(d / block["labels"], sep=";", dtype=str)
+        lab = pd.read_csv(d / block["labels"], sep=";", dtype=str, keep_default_na=False)
         t = pd.to_numeric(lab["#Time"]).to_numpy(np.int64)
         t0, n = int(t.min()), int(t.max() - t.min() + 1)
         grid = np.full(n, "None", dtype=object)
@@ -249,7 +249,9 @@ def _run(run: Run) -> int:
     log.info("features %s (%.0fs)", X.shape, time.time() - t0)
     counts = meta.groupby(["block", "fault"]).size().unstack(0).fillna(0).astype(int)
     log.info("windows\n%s", counts)
-    main = meta["fault"].isin(CLASS_MAP).to_numpy()
+    if not set(CLASS_MAP) <= set(meta["fault"]):
+        raise RuntimeError(f"missing classes: {sorted(meta['fault'].unique())}")
+    main = meta["fault"].isin(list(CLASS_MAP)).to_numpy()
     X5 = X[main]
     m5 = meta[main].reset_index(drop=True)
     y5 = m5["fault"].map(CLASS_MAP).to_numpy(dtype=str)
