@@ -11,6 +11,21 @@ raw_files:
   pm100/job_table.parquet:
     published_md5: cf85f171a5ed5ff1d951d93f9bcbc6ef   # Zenodo 10127767, given by Mahesh 9 Oct 2026
 
+# D93: fetched only by scripts/download_data.py --download, after Mahesh's OK (about 1.65 GB).
+downloads:
+  - path: antarex/Readme_Antarex_Dataset.pdf
+    url: https://zenodo.org/records/2553224/files/Readme_Antarex_Dataset.pdf?download=1
+    md5: 02cc040ae11f648a02d5e900b80353fa
+  - path: antarex/Antarex.zip
+    url: https://zenodo.org/records/2553224/files/Antarex.zip?download=1
+    md5: 285e502a5e2943a5e7e5b6dd2663b06a
+  - path: prodigy/eclipse_small_prod_dataset.tar
+    url: https://zenodo.org/records/8079388/files/eclipse_small_prod_dataset.tar?download=1
+    md5: 7e7514fe2ccd8d01e0c7b3f28b30f57b
+  - path: prodigy/fe_eclipse_tsfresh_raw_CHI_2000.json
+    url: https://zenodo.org/records/8079388/files/fe_eclipse_tsfresh_raw_CHI_2000.json?download=1
+    md5: 3d8968004eee12e5d43354c860fad311
+
 eagle:
   raw: data/raw/eagle/eagle_data.parquet
   out_jobs: data/processed/jobs_eagle.parquet
