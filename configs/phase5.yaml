@@ -13,14 +13,24 @@ probes:                                  # §2; larger x = worse; log x ~ N(k lo
     mem:   {cpu: 0.0, mbw: 0.1, cache: 0.0, mem: 0.0}
   mem_fixed_shift: 0.5                   # cause mem on probe mem: fixed, not scaled by s
 
-evalue:                                  # §3
-  n_pool: 200
-  beta: 0.5
+evalue:                                  # §3 as amended by D87
+  n_pool: 1000
+  beta: 0.9
   bet_s0: 1.3
-  bet_causes: [cpu, cache, mbw]
-  bins: 20
-  bet_draws: 600000
-  bet_pools: 2000                        # g_a is built over independent pools, not the scored pool
+  edges: [0, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1]
+  bet_pools: 2000                        # g_{a,h} is built over independent pools (D87)
+  pool_seed: 7001                        # the fixed healthy pool of each probe (D88)
+
+policy:                                  # §4, D86, D89, D90
+  s_grid: [1.1, 1.2, 1.3, 1.5, 2.0, 3.0]
+  pi0_h0: 0.5
+  tau: 0.95
+  exclude_days: 7
+  gh_nodes: 11
+  tel_cost_s: 60
+  tel_correct: 0.80                      # design confusion [A], only if no measured matrix is given
+  tel_confused: 0.08
+  tel_healthy: 0.96
 
 budget_check:                            # planning numbers only; development seeds
   pool_draws: 2000
