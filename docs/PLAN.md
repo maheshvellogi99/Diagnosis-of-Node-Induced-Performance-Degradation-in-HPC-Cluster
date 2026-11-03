@@ -616,7 +616,7 @@ critical event. Report as exploratory; not a primary result.
 
 ### Phase 5 — Layer 3 v2: active probing as evidence + cause diagnosis (simulation)
 
-`docs/PHASE5_DESIGN.md` is the specification (D85), as amended by D86–D101 below. It supersedes
+`docs/PHASE5_DESIGN.md` is the specification (D85), as amended by D86–D104 below. It supersedes
 PROMPT 5 in `docs/PHASE_PROMPTS_5_6.md` and LAYER3_DESIGN.md §3–§4. Everything is labelled
 "simulation, design probe model [A]"; real numbers come from Phase 6.
 
@@ -640,13 +640,22 @@ PROMPT 5 in `docs/PHASE_PROMPTS_5_6.md` and LAYER3_DESIGN.md §3–§4. Everythi
   pool on one bet). Assumption [A] (D88): the measured pool is exchangeable with future healthy runs
   of the same node type. Every validity table reports the fixed pool and a pool drawn per base side by
   side. Phase 6 target: at least 1000 healthy runs per probe type and a measured σ per probe.
+  One fixed pool cannot make every bet fair conditionally: 39–76% of fresh 1000-run pools have a
+  positive maximum of healthy log-growth over bet weights; on the fixed pools the measured worst
+  case is +0.0035 nats per probe, about 2,600 probes to reach 9.19 nats (D102). Bet check (D102):
+  (i) mean healthy log-growth averaged over 2,000 independent pools ≤ 0 for every bet the policy can
+  use; (ii) on the fixed pool, healthy growth at the bets actually used is reported (max, q99,
+  mean); (iii) validity is judged by null, decoy and shock P(ever), fixed pool and pool per base
+  side by side.
 - 5.4 Diagnosis: joint posterior over (cause, s), uniform over the 6 scenario s values (D89), summed
   to the 5 hypotheses; prior π0(h0) = 0.5, causes uniform, restarted for each investigation (D90).
   Next probe = argmax [H(π) − E_x H(π | x, a)] / c_a. Stop at max π ≥ 0.95, all probes used, or
   budget cut (the investigation ends with what it has, D90).
   D97 variant (stage-wise): while the node is not flagged by e-BH at the current evaluation, the
   next probe maximises the expected log f per second under the current posterior (evidence); once
-  it is flagged, information gain per second (diagnosis). Selection rule fixed before results: D97 is
+  it is flagged, information gain per second (diagnosis). Expected log f is computed from bin
+  probabilities averaged over independent pools, the construction of the bets, never from the
+  fixed pool (D103). Selection rule fixed before results: D97 is
   kept if its KM F(14 d) at K = 1%, s = 1.3, B = 1800 is at least 0.02 above IG-only AND its null
   P(ever) ≤ α + 2 SE; otherwise IG-only is kept.
 - 5.5 Schedule: every 6 h, budget B/4 plus carry-over, available budget capped at one day's budget
@@ -914,3 +923,6 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D99 | 3 Nov 2026 | Install h5py (pinned h5py==3.16.0, chosen by Mahesh 3 Nov 2026); run the Prodigy secondary check (reported only). Correction: Prodigy labels include cpuoccupy; the architect's D94 description (healthy vs memleak only) was wrong | Mahesh |
 | D100 | 3 Nov 2026 | Probe e-values are valid marginally over the healthy-pool draw (as in split conformal); fixed-pool and pool-per-base results side by side in every validity table; Phase 6 pool target ≥ 1000 runs per probe type plus a measured σ per probe | Mahesh |
 | D101 | 3 Nov 2026 | Pre-registered final sealed evaluation (Phase 5F), after the Phase 6 tables or with design tables if Phase 6 is impossible: budget grid {0, 300, 1800, 7200}; headline B = 7200 node-s/day. Gate 5F: (i) null, decoy and shock P(ever) ≤ α + 2 SE at every B; (ii) KM F(14 d) ≥ 0.8 at K = 1%, s = 1.3, B = 7200; (iii) diagnosis accuracy ≥ 0.9 at B = 7200. Gate 5b (B = 300) stays recorded as FAILED on development seeds | Mahesh |
+| D102 | 3 Nov 2026 | Replace the strict D96 check by the marginal check: (i) mean healthy log-growth averaged over 2,000 independent pools ≤ 0 for every bet the policy can use (report the mean over pools of E[f \| pool] and of log f); (ii) on the fixed pool, healthy growth at the bets the policy actually used (max, q99, mean); (iii) validity judged by null, decoy and shock P(ever), fixed pool and pool per base side by side (D100). Probe e-values are valid marginally over the healthy-pool draw, as in split-conformal calibration; one fixed pool cannot make every bet fair conditionally (39–76% of fresh 1000-run pools have a positive maximum); measured worst case +0.0035 nats per probe, about 2,600 probes to reach 9.19 nats | Mahesh |
+| D103 | 3 Nov 2026 | D97 ranks probes by expected log f computed from bin probabilities averaged over independent pools (the construction of the bets), never from the fixed pool | Mahesh |
+| D104 | 3 Nov 2026 | Disclose in the Phase 5b report that Phase 5's D87 check tested only a few bets; under the full search the Phase 5 bets also reach +0.0034 (mbw) and +0.0012 (mem) nats per probe | Mahesh |
