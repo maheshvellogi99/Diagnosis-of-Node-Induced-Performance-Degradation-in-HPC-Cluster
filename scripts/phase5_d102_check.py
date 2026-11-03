@@ -8,7 +8,7 @@ bets) for every bet the policy can use: at the prior, after mem rules out cause 
 exact value, where the pool-averaged bin probability is the bin width. Mean over pools of
 E[f | pool]. (ii) Healthy growth on the fixed pool at the bets actually used, from 20,000
 investigations of a healthy node per probe rule. STOP if (i) is above 0: the exact value above
-1e-12, or the 2,000-pool estimate above twice its standard error over pools.
+1e-12, or the 2,000-pool estimate above max(twice its standard error over pools, 1e-12).
 """
 
 from __future__ import annotations
@@ -122,7 +122,8 @@ def _run(run: Run) -> int:
         rows += marginal(cfg, n, np.random.default_rng([cfg["seed"], n, 102]))
     t = pd.DataFrame(rows)
     print(t.round(5).to_string(index=False))
-    bad = t[(t["exact_log_f"] > 1e-12) | (t["mean_log_f"] > 2 * t["se_over_pools"])]
+    tol = np.maximum(2 * t["se_over_pools"], 1e-12)  # 1e-12: floating-point rounding of log 1
+    bad = t[(t["exact_log_f"] > 1e-12) | (t["mean_log_f"] > tol)]
     bad = bad.to_dict("records")
     u = {}
     for lab, pol, fl in (
