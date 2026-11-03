@@ -68,3 +68,10 @@ antarex:                                 # D94
 telemetry:                               # D94; rows true class, columns predicted: h0, cpu, cache, mbw, mem
   counts: [[20039, 0, 0, 0, 0], [0, 1560, 0, 0, 0], [0, 0, 1617, 0, 0], [0, 0, 0, 1513, 0], [0, 0, 0, 0, 1630]]     # main: out-of-fold, run 20261102-003936-classifier
   crossblock_counts: [[13318, 4906, 1815, 0, 0], [0, 1525, 35, 0, 0], [175, 453, 989, 0, 0], [0, 0, 0, 1500, 13], [0, 0, 0, 0, 1630]]     # sensitivity: train one block, test the other, both directions summed, run 20261102-004249-d94-diag
+
+prodigy:                                 # D99 secondary binary check, reported only
+  dir: data/interim/prodigy              # extracted from data/raw/prodigy/eclipse_small_prod_dataset.tar
+  files: [[prod_train_data.hdf, prod_train_data, prod_train_label.csv],
+          [prod_test_data.hdf, prod_test_data, prod_test_label.csv]]
+  n_folds: 5                             # grouped by job_id; settings fixed before any result
+  cumulative_share: 0.9                  # metric differenced if a counter in >= 90% of samples
