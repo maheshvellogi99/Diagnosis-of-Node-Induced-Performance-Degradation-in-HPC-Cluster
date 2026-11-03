@@ -75,3 +75,15 @@ prodigy:                                 # D99 secondary binary check, reported 
           [prod_test_data.hdf, prod_test_data, prod_test_label.csv]]
   n_folds: 5                             # grouped by job_id; settings fixed before any result
   cumulative_share: 0.9                  # metric differenced if a counter in >= 90% of samples
+
+grid5b:                                  # Phase 5b development grid (D95-D98, D103); seeds 0-19 only
+  budgets: [0, 60, 300, 1800, 7200]
+  probe_rules: [ig, stage]               # D97 comparison
+  validity_kinds: ["null", user_decoy, user_decoy_heavy, system_shock]
+  d86_budgets: [300, 1800, 7200]         # the architect's failed rule, reported row
+  design_rule_budgets: [300, 7200]
+  k1_variants: [tel_oof]                 # D98 sensitivity
+  k1_variant_budgets: [300, 1800, 7200]
+  misspec_variants: [misspec]
+  misspec_budgets: [300, 7200]
+  real_budgets: [300, 7200]

@@ -30,16 +30,23 @@ from hpcdiag.layer3.probes import HYPOTHESES
 from hpcdiag.utils.checksums import verify
 from hpcdiag.utils.run import Run, load_config, resolve, run_guarded, start_run
 
-BATTERY = {"probes": "battery"}
+BATTERY = {"probes": "battery", "exclusion": "cleared"}
+D86 = {"exclusion": "cleared"}
 POLICIES: dict[str, dict] = {
-    "ours": {},  # IG per second, rank order, D86
-    "ours_design_rule": {"exclusion": "all"},  # D86 sensitivity row
-    "ours_skipdone": {"exclusion": "cleared_skipdone"},  # disclosed extra row, see report
+    # Phase 5 names (D86 primary then), kept so the Phase 5 task lists mean what they meant
+    "ours": dict(D86),
+    "ours_design_rule": {"exclusion": "all"},
+    "ours_skipdone": {"exclusion": "cleared_skipdone"},
     "P-all": dict(BATTERY),
-    "P-IG": {"probes": "ig_unit"},
-    "P-random": {"probes": "random"},
-    "P-randnode": {"nodes": "random"},
-    "P-sweep": {"nodes": "sweep", "exclusion": "none", **BATTERY},
+    "P-IG": {"probes": "ig_unit", **D86},
+    "P-random": {"probes": "random", **D86},
+    "P-randnode": {"nodes": "random", **D86},
+    "P-sweep": {"nodes": "sweep", "exclusion": "none", "probes": "battery"},
+    # Phase 5b (D95 rule primary)
+    "ig": {"exclusion": "cleared_skipdone"},  # IG per second only
+    "stage": {"exclusion": "cleared_skipdone", "probes": "stage"},  # D97 with D103
+    "d86": dict(D86),  # the architect's failed rule, reported row (D95)
+    "design_rule": {"exclusion": "all"},
 }
 BASELINES = ("P-all", "P-IG", "P-random", "P-randnode", "P-sweep")
 L: dict = {}  # per-process state
@@ -126,6 +133,20 @@ def world_arrays(meta: dict, truth: pd.DataFrame, n_nodes: int) -> tuple:
     return cause, onset, rows
 
 
+def growth_summary(v: list[float]) -> dict:
+    """D102 (ii): fixed-pool healthy growth of the bets used on healthy nodes in one run."""
+    if not v:
+        return {"n": 0}
+    a = np.asarray(v)
+    return {
+        "n": len(a),
+        "max": float(a.max()),
+        "q99": float(np.quantile(a, 0.99)),
+        "mean": float(a.mean()),
+        "n_gt_0": int((a > 0).sum()),
+    }
+
+
 def bel_names(cfg: dict) -> list[str]:
     return list(cfg["probes"]["names"])
 
@@ -142,7 +163,7 @@ def run_one(sid, meta, truth, snap, extra, variant, base_policy, B) -> dict:
     wld = ST.make_world(cfg, ST.VARIANTS[variant], s, cause, onset, key(meta["base"]), key(sid))
     rng = np.random.default_rng([cfg["seed"], key(sid), key(variant), key(pol.name)])
     excl = int(cfg["policy"]["exclude_days"] * SIM.BLOCKS_PER_DAY)
-    logE, inv = SIM.run_policy(snap, bel, wld, pol, rng, lc["alpha"], m, excl)
+    logE, inv = SIM.run_policy(snap, bel, wld, pol, rng, lc["alpha"], m, excl, log_growth=True)
     t_sim = time.time() - t0
     flags = SEL.ebh_over_time(logE, lc["alpha"], m)
     out = MT.null_metrics(flags, eval_ns)
@@ -208,6 +229,8 @@ def run_one(sid, meta, truth, snap, extra, variant, base_policy, B) -> dict:
         "probe_counts": used,
         "second_probe": second,
         "max_logE_final": float(logE[-1].max()),
+        "healthy_growth": growth_summary([g for r in inv for g in r["healthy_growth"]]),
+        "investigations_unflagged": sum(not r["flagged"] for r in inv),
         "sim_s": t_sim,
         "total_s": time.time() - t0,
     }
@@ -282,6 +305,40 @@ def tasks_addon(cfg: dict, idx: pd.DataFrame) -> dict[str, list]:
     return t
 
 
+def tasks_5b(cfg: dict, idx: pd.DataFrame) -> dict[str, list]:
+    """Phase 5b development grid (D95-D98, D103). Reads index.parquet only; seeds 0-19."""
+    g = cfg["grid5b"]
+    t: dict[str, list] = {}
+
+    def add(sids, runs):
+        for s in sids:
+            t.setdefault(s, []).extend(runs)
+
+    rand = idx[idx["base"] != "real"]
+    node = rand[rand["kind"] == "node"]
+    nodes = node["scenario_id"].tolist()
+    k1 = node[node["K_pct"] == 1]["scenario_id"].tolist()
+    valid = rand[rand["kind"].isin(g["validity_kinds"])]["scenario_id"].tolist()
+    rules, Bs = g["probe_rules"], g["budgets"]
+    pos = [b for b in Bs if b > 0]
+    add(nodes + valid, [("main", "ig", 0)] + [("main", r, b) for r in rules for b in pos])
+    add(valid, [("pool_redraw", r, b) for r in rules for b in pos])
+    add(k1, [("main", "d86", b) for b in g["d86_budgets"]])
+    add(k1, [("main", "design_rule", b) for b in g["design_rule_budgets"]])
+    add(k1, [(v, r, b) for v in g["k1_variants"] for r in rules for b in g["k1_variant_budgets"]])
+    add(valid + k1, [(v, r, b) for v in g["misspec_variants"] for r in rules
+                     for b in g["misspec_budgets"]])  # fmt: skip
+    real = idx[
+        (idx["base"] == "real")
+        & (((idx["kind"] == "node") & (idx["K_pct"] == 1)) | (idx["kind"] == "null"))
+    ]
+    add(
+        real["scenario_id"].tolist(),
+        [("main", "ig", 0)] + [("main", r, b) for r in rules for b in g["real_budgets"]],
+    )
+    return t
+
+
 def tasks_pilot(cfg: dict, idx: pd.DataFrame) -> dict[str, list]:
     g = cfg["grid"]
     t = {}
@@ -307,7 +364,9 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
     if problems:
         raise RuntimeError(f"raw checksum problems: {problems}")
     idx = pd.read_parquet(resolve("data/processed/scenarios/index.parquet"))
-    t = {"pilot": tasks_pilot, "full": tasks_full, "addon": tasks_addon}[mode](cfg, idx)
+    t = {"pilot": tasks_pilot, "full": tasks_full, "addon": tasks_addon, "dev5b": tasks_5b}[mode](
+        cfg, idx
+    )
     check_sealed(list(t))
     tasks = ordered(t)
     n_runs = sum(len(v) for _, v in tasks)
@@ -343,7 +402,7 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--mode", choices=["pilot", "full", "addon"], required=True)
+    ap.add_argument("--mode", choices=["pilot", "full", "addon", "dev5b"], required=True)
     ap.add_argument("--workers", type=int, default=7)
     a = ap.parse_args()
     return run_guarded(
