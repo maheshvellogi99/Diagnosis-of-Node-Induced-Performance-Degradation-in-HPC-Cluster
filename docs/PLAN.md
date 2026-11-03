@@ -195,7 +195,7 @@ Phase 3 extension (D30, D34): `node_id` nullable (null for user_decoy and system
 | PM100 (Marconi100) | Layers 1 + 2 (has node lists) | https://zenodo.org/records/10127767 → `job_table.parquet`; code https://github.com/francescoantici/PM100-data | 287 MB | Downloading. Licence: check Zenodo page (Q3) |
 | M100 full (Nagios) | Weak real labels for Layer 2 (exploratory) | parent DOI 10.5281/zenodo.7588815; tools https://gitlab.com/ecs-lab/exadata | 30–45 GB per month | **Do not download yet.** Phase 4b only, 1–2 months, Nagios plugin only |
 | Antarex HPC Fault Dataset | Layer 3 telemetry classifier, Gate 5d (D94) | 10.5281/zenodo.2553224 → `Antarex.zip`, `Readme_Antarex_Dataset.pdf` | about 1.65 GB with Prodigy, download | CC-BY 4.0. Fetched by `scripts/download_data.py` after Mahesh's OK (D93); only CPU/memory blocks extracted |
-| Prodigy artifact (Eclipse) | Secondary binary check only (healthy vs memleak), reported (D94) | 10.5281/zenodo.8079388 → `eclipse_small_prod_dataset.tar`, `fe_eclipse_tsfresh_raw_CHI_2000.json` | see above | CC-BY 4.0. The earlier project's copy is lost; not used (D93) |
+| Prodigy artifact (Eclipse) | Secondary binary check only, reported (D94, D99). Labels: healthy, cpuoccupy, memleak (D94's "healthy vs memleak only" was wrong, D99); read with h5py 3.16.0 | 10.5281/zenodo.8079388 → `eclipse_small_prod_dataset.tar`, `fe_eclipse_tsfresh_raw_CHI_2000.json` | see above | CC-BY 4.0. The earlier project's copy is lost; not used (D93) |
 | HPAS | Fault injection (Phase 6) | https://github.com/peaclab/HPAS (BSD-3) | code | Phase 6 |
 | F-DATA (Fugaku) | — | — | — | **Not used**: no node list |
 
@@ -616,7 +616,7 @@ critical event. Report as exploratory; not a primary result.
 
 ### Phase 5 — Layer 3 v2: active probing as evidence + cause diagnosis (simulation)
 
-`docs/PHASE5_DESIGN.md` is the specification (D85), as amended by D86–D94 below. It supersedes
+`docs/PHASE5_DESIGN.md` is the specification (D85), as amended by D86–D101 below. It supersedes
 PROMPT 5 in `docs/PHASE_PROMPTS_5_6.md` and LAYER3_DESIGN.md §3–§4. Everything is labelled
 "simulation, design probe model [A]"; real numbers come from Phase 6.
 
@@ -626,29 +626,44 @@ PROMPT 5 in `docs/PHASE_PROMPTS_5_6.md` and LAYER3_DESIGN.md §3–§4. Everythi
   with slowdown s: log x ~ N(k_{h,a} log s, σ²), k table in design §2, σ = 0.05, costs 20/20/20/1 s;
   telemetry a_tel 60 s, diagnosis only, never in e-values.
 - 5.2 Probe e-values: conformal p against a healthy pool of n_pool = 1000 runs (200 as sensitivity,
-  D87). f_a(p) = (1 − β) + β g_a(p), β = 0.9, g_a = Σ_h π(h | not h0) g_{a,h}: current cause
-  posterior of the investigation (predictable) times per-cause bets built over 2,000 independent
-  pools at s0 = 1.3, on bin edges {0, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1}, each
-  integrating to exactly 1 (D87).
+  D87). f_a(p) = (1 − β) + β g_a(p), β = 0.9, on bin edges {0, 0.001, 0.002, 0.005, 0.01, 0.02,
+  0.05, 0.1, 0.2, 0.5, 1}. Since D96: g_a = Σ_{(h, s0)} π(h, s0 | not h0) g_{a,h,s0}, the CURRENT
+  joint posterior of the investigation (predictable: finished probes only) over cause and s0 ∈
+  {1.1, 1.2, 1.3, 1.5, 2.0, 3.0}, each g_{a,h,s0} built over 2,000 independent pools and integrating
+  to exactly 1. (Phase 5 used per-cause bets at s0 = 1.3 only, D87; they lowered recall at s = 1.1.)
 - 5.3 Combined evidence: multiplying every jumper state by f leaves state proportions unchanged and
   the jumper update is linear homogeneous, so exactly
   log E_n(t) = log M_n^{Rn}(t) + Σ_{probes finished by t} log f_a(p). e-BH α = 0.1, m = 980 on E_n.
-  Validity: conditional on the pool, f has mean 1 only if the pool is drawn fresh; a single fixed
-  pool gives E[f | pool] ≠ 1, so the e-value property is marginal over pools. Assumption [A] (D88):
-  the fixed pool is treated as exchangeable with future healthy runs and the marginal statement is
-  what is claimed; redraw-per-base is reported as a sensitivity.
+  **Validity statement (D100):** probe e-values are valid marginally over the draw of the healthy
+  pool, as in split conformal prediction: E[f] ≤ 1 when the pool and the new run are exchangeable
+  healthy runs, while E[f | pool] for one fixed pool can exceed 1 (Phase 5: up to 4.0 for the mbw
+  pool on one bet). Assumption [A] (D88): the measured pool is exchangeable with future healthy runs
+  of the same node type. Every validity table reports the fixed pool and a pool drawn per base side by
+  side. Phase 6 target: at least 1000 healthy runs per probe type and a measured σ per probe.
 - 5.4 Diagnosis: joint posterior over (cause, s), uniform over the 6 scenario s values (D89), summed
   to the 5 hypotheses; prior π0(h0) = 0.5, causes uniform, restarted for each investigation (D90).
   Next probe = argmax [H(π) − E_x H(π | x, a)] / c_a. Stop at max π ≥ 0.95, all probes used, or
   budget cut (the investigation ends with what it has, D90).
+  D97 variant (stage-wise): while the node is not flagged by e-BH at the current evaluation, the
+  next probe maximises the expected log f per second under the current posterior (evidence); once
+  it is flagged, information gain per second (diagnosis). Selection rule fixed before results: D97 is
+  kept if its KM F(14 d) at K = 1%, s = 1.3, B = 1800 is at least 0.02 above IG-only AND its null
+  P(ever) ≤ α + 2 SE; otherwise IG-only is kept.
 - 5.5 Schedule: every 6 h, budget B/4 plus carry-over, available budget capped at one day's budget
-  (answer 2). Nodes in rank order of log E_n. Primary rule (D86): only cleared nodes (π(h0) ≥ 0.95)
-  are excluded for 7 d; other nodes stay eligible in the next block. The design rule (every
-  investigated node excluded 7 d) is a sensitivity row.
+  (answer 2). Nodes in rank order of log E_n. **Primary rule (D95):** cleared nodes (π(h0) ≥ 0.95)
+  are excluded for 7 d; a node flagged by e-BH at the current evaluation whose latest investigation
+  ended with max cause posterior ≥ 0.95 is not investigated (handed to the admin; if it leaves the
+  e-BH set it becomes eligible again); all others stay eligible. Adopted after the Phase 5
+  development grid; it had been committed as a sensitivity row before any result. D86 (only
+  cleared nodes excluded) is the architect's failed rule, kept as a reported row: it starves the
+  budget (reports/phase_5.md §1). The design rule (every investigated node excluded 7 d) is also a row.
 - 5.6 Baselines P-all (all five probes, 121 s), P-IG, P-random, P-randnode, P-sweep; B ∈ {60, 300,
   1800} node-s/day, and B = 0 is Layer 2 alone. Our policy also at B = 7200 (D91).
-- 5.7 Telemetry likelihood: out-of-fold confusion matrix of a Random Forest on Antarex (D94).
-  Its transfer to PM100 nodes is an assumption [A].
+- 5.7 Telemetry likelihood (D98): the cross-block confusion matrix of the Antarex Random Forest
+  (train on one block, test on the other, both directions summed), add-one smoothed; the
+  out-of-fold matrix of D94 is a sensitivity row. The Gate 5d score of 1.0 is a fault-program
+  fingerprint: cross-configuration macro-F1 is 0.69 and 0.85. Transfer to PM100 nodes is an
+  assumption [A].
 
 **Gate 5** (pre-registered; design §7, 5d replaced by D94).
 - 5a validity (binding): B = 300, null P(ever) ≤ α + 2 SE on the 200 old null bases; decoy and shock
@@ -659,6 +674,20 @@ PROMPT 5 in `docs/PHASE_PROMPTS_5_6.md` and LAYER3_DESIGN.md §3–§4. Everythi
 - 5d telemetry classifier (D94): RF on Tuncer-style statistical features over 60-s windows from the
   Antarex CPU/memory blocks, classes healthy, dial → cpu, ddot → cache, memeater → mbw, leak → mem,
   split by contiguous time blocks or runs, never random windows: macro-F1 ≥ 0.90 [D].
+
+**Gate 5 results on development seeds (reports/phase_5.md):** 5a passed; **5b FAILED** (0.245 at
+B = 300; recorded as failed, D101); 5c failed under D86; 5d 1.0000, a fingerprint (D98).
+
+### Phase 5F — final sealed evaluation (pre-registered, D101)
+
+Runs once, after the Phase 6 tables (or with the design tables if Phase 6 is impossible), on the
+sealed seeds 20–39 (node, user_decoy, user_decoy_heavy, system_shock) and nulls 200–399, with the
+system frozen as at the end of Phase 5b. Budget grid {0, 300, 1800, 7200} node-s/day; headline
+budget B = 7200.
+
+**Gate 5F.** (i) Validity: null, decoy and shock P(ever) ≤ α + 2 SE at every B, fixed pool and pool
+per base reported side by side (D100). (ii) KM P(flag ≤ 14 d) ≥ 0.8 at K = 1%, s = 1.3, B = 7200.
+(iii) Top-1 diagnosis accuracy ≥ 0.9 among flagged degraded nodes at B = 7200. No change after the run.
 
 ---
 
@@ -718,7 +747,7 @@ end, status, key metrics. Reports cite run ids.
 | Straggler contamination: a healthy node sharing jobs with a degraded node sees late jobs, so its per-node null is violated (D72) | Guarantee not claimed with degraded nodes present; co-allocated false flags measured separately. D71 blame allocation did not reduce them on the development pilot and is rejected (D75) |
 | Real Mode P p-values are marginally but not conditionally calibrated: temporal clustering (autocorrelation of 1{p < 0.1} = 0.29, 0.20, 0.06 at lags 1, 10, 100) breaks the condition behind the e-process guarantee, even under the global null (D76) | Gate 4a on the real p-value trace is the evidence, stated as empirical; v1 passes it partly because w_j = 1/\|N_j\| dilutes bursts, so designs that concentrate bets must be re-checked on real nulls (D71: 0.300 ± 0.032 vs 0.035 on iid p-values). Details in reports/phase_4b.md |
 | Relative e-values (D78) rely on placement being exchangeable within a partition and block: true by construction on the random base, an assumption [A] on the real placement | Validity results are on the random base; on the real base flags are reported as unknown truth, with placement concentration per flagged node (D84) |
-| Probe e-values use one fixed healthy pool, so E[f \| pool] ≠ 1 and repeated probes share it: the e-value property holds marginally over pools only (D88) | Assumption [A]: the pool is exchangeable with future healthy probe runs. E[f \| pool] over 2,000 pools and its value for the pool used are reported; redraw-per-base sensitivity |
+| Probe e-values use one fixed healthy pool, so E[f \| pool] ≠ 1 and repeated probes share it: the e-value property holds marginally over pools only, as in split conformal (D88, D100). Phase 5: null P(ever) 9/200 with the fixed pool against 1/200 with a pool per base at B = 300, 8 of the 9 created by probes | Assumption [A]: the pool is exchangeable with future healthy probe runs. Every validity table shows fixed pool and pool per base side by side; Phase 6 target ≥ 1000 healthy runs per probe type and a measured σ per probe |
 | Nodes 460, 480, 481, 500 are flagged by Rn(1) on real placement (D84) and are user-dominated: top-user share above q90 of all nodes, 7–12 users. Likely placement effects that break exchangeability [A] (D92) | They are the motivating case for Layer 3: a probe measures the node, not the user. No simulated claim about them, because the simulation has no model of what these nodes are |
 | Antarex telemetry classifier transferred to PM100 nodes (D94). Macro-F1 1.0000 within a block is a fingerprint of the fault programs: train on one block and test on the other gives 0.69 and 0.85 on the same machine (reports/phase_5.md §6) | Assumption [A]: different hardware, applications and metrics. The confusion matrix is a design input for a_tel, never used in e-values; cross-block and transfer sensitivity rows reported; Phase 6 replaces it |
 | Injection model too simple (straggler assumption) | "partial" variant; Phase 6 real injections |
@@ -878,3 +907,10 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D92 | 2 Nov 2026 | D84 recorded in §12: nodes 460, 480, 481, 500 are user-dominated, likely placement effects that break exchangeability [A]; motivating case for Layer 3; no simulated claim about them | Mahesh |
 | D93 | 2 Nov 2026 | Datasets: extend scripts/download_data.py to fetch and md5-verify Antarex (10.5281/zenodo.2553224, CC-BY 4.0) and the Prodigy artifact (10.5281/zenodo.8079388, CC-BY 4.0) into data/raw/antarex/, data/raw/prodigy/, after Mahesh's OK; SHA-256 in CHECKSUMS.txt; extract only the CPU/memory blocks needed; data cards antarex.md and prodigy.md; STOP if a checksum fails. The earlier project's Prodigy data is lost and not used | Mahesh |
 | D94 | 2 Nov 2026 | Gate 5d redefined before any result: RF on Tuncer-style statistical features over 60-s windows (F22, F26) from Antarex CPU/memory blocks, classes healthy, dial → cpu, ddot → cache, memeater → mbw, leak → mem (cpufreq, pagefail, ioerr, copy reported but excluded from the H mapping); split by contiguous time blocks or runs, never random windows; macro-F1 ≥ 0.90 [D], reported next to Netti et al.'s published RF F-score 0.98 (arXiv 2007.14241, figure given by Mahesh, not checked against the paper here) as context. Out-of-fold confusion matrix = a_tel likelihood (diagnosis only, never in e-values); transfer to PM100 is an assumption [A]. Prodigy artifact = secondary binary check, reported only | Mahesh |
+| D95 | 3 Nov 2026 | Investigation rule: the skip rule is PRIMARY. Cleared nodes (π(h0) ≥ 0.95) excluded for 7 d; flagged nodes that already have a diagnosis (max cause posterior ≥ 0.95) are not investigated again (handed to the admin); all others stay eligible. Disclosed: adopted after the development grid; it was committed as a sensitivity row before any result. D86 is kept as a reported row and recorded as the architect's failed rule | Mahesh |
+| D96 | 3 Nov 2026 | Bets over all slowdown sizes: bet for probe a = Σ_{(h, s0)} π(h, s0 \| not h0) g_{a,h,s0} with the CURRENT joint posterior (D89), s0 ∈ {1.1, 1.2, 1.3, 1.5, 2.0, 3.0}, each g built over 2,000 independent pools and integrating to exactly 1. Re-run the D87 check (healthy growth per probe ≤ 0 for every reachable posterior state; growth per cause and s); STOP if any healthy growth > 0 | Mahesh |
+| D97 | 3 Nov 2026 | Stage-wise probe choice (variant): before the node is flagged, the probe maximising expected log f per second under the current posterior; after, information gain per second. Compared with IG-only on development seeds. Kept if its KM F(14 d) at K = 1%, s = 1.3, B = 1800 is ≥ 0.02 above IG-only AND its null P(ever) ≤ α + 2 SE; otherwise IG-only | Mahesh |
+| D98 | 3 Nov 2026 | Telemetry likelihood = cross-block matrix (both directions) as main; OOF matrix as sensitivity. The 5d score of 1.0 is a fault-program fingerprint (cross-configuration 0.69 / 0.85) | Mahesh |
+| D99 | 3 Nov 2026 | Install h5py (pinned h5py==3.16.0, chosen by Mahesh 3 Nov 2026); run the Prodigy secondary check (reported only). Correction: Prodigy labels include cpuoccupy; the architect's D94 description (healthy vs memleak only) was wrong | Mahesh |
+| D100 | 3 Nov 2026 | Probe e-values are valid marginally over the healthy-pool draw (as in split conformal); fixed-pool and pool-per-base results side by side in every validity table; Phase 6 pool target ≥ 1000 runs per probe type plus a measured σ per probe | Mahesh |
+| D101 | 3 Nov 2026 | Pre-registered final sealed evaluation (Phase 5F), after the Phase 6 tables or with design tables if Phase 6 is impossible: budget grid {0, 300, 1800, 7200}; headline B = 7200 node-s/day. Gate 5F: (i) null, decoy and shock P(ever) ≤ α + 2 SE at every B; (ii) KM F(14 d) ≥ 0.8 at K = 1%, s = 1.3, B = 7200; (iii) diagnosis accuracy ≥ 0.9 at B = 7200. Gate 5b (B = 300) stays recorded as FAILED on development seeds | Mahesh |

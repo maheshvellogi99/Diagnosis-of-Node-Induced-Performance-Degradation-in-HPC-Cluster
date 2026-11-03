@@ -19,8 +19,8 @@ Secondary binary check only, reported only (D94). Not used in any e-value or in 
 Columns: job_id, component_id, app_name, anom_name, anom_input, binary_anom.
 `prod_train_data.hdf` and `prod_test_data.hdf` are HDF5.
 
-**Correction to D94's wording:** the test labels hold cpuoccupy as well as memleak, so the artifact is
-not "healthy vs memleak only". The training file is healthy only.
+**Correction (D99):** the test labels hold cpuoccupy as well as memleak. The architect's D94 description
+("healthy vs memleak only") was wrong. The training file is healthy only.
 
 ## Status
 `UNKNOWN — needs check`: feature counts, sampling and window length inside the HDF files. Reading them
