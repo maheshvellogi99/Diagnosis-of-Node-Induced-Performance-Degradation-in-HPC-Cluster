@@ -57,8 +57,8 @@ class World:
     conf: np.ndarray
     cause: np.ndarray
     onset_idx: np.ndarray  # first evaluation index at or after onset; large = never
-    pool_key: int = 0  # identifies the pools, for caches that depend on them
-    pbins: np.ndarray | None = None  # policy's P(bin | state) on these pools (D97), lazily set
+    pool_key: int = 0  # identifies the pools
+    healthy_bins: np.ndarray | None = None  # true healthy P(bin) on these pools, lazily set
 
 
 def gain_order(pi: np.ndarray, unused: list[int], bel: Belief, by_cost: bool) -> int:
@@ -82,35 +82,36 @@ def gain_order(pi: np.ndarray, unused: list[int], bel: Belief, by_cost: bool) ->
     return best
 
 
-def policy_bins(bel: Belief, wld: World) -> np.ndarray:
-    """(n_probes, n_states, n_bins): P(p in bin) under each state of the policy's model, on the
-    pools the p-values are computed against (the policy knows its measured pools)."""
-    if wld.pbins is None:
-        wld.pbins = np.stack(
+def expected_log_f(pi: np.ndarray, a: int, bel: Belief) -> float:
+    """E[log f_a] under the current posterior (states include h0), with the bet it would use. Bin
+    probabilities are averaged over independent pools, never taken from the fixed pool (D103)."""
+    lf = bel.bets.log_f_bins(a, bel.bets.weights(pi, bel.hyp))
+    return float(pi @ (bel.bets.P[a] @ lf))
+
+
+def fixed_pool_healthy_growth(a: int, w: np.ndarray, bel: Belief, wld: World) -> float:
+    """Exact mean log f of the bet in use for a healthy run scored against this world's pool, under
+    the true healthy model (D102 ii). Reported only; never used by the policy."""
+    if wld.healthy_bins is None:
+        wld.healthy_bins = np.stack(
             [
-                EV.bin_probs(bel.means[:, a], bel.sigma, wld.pools[a], bel.bets.edges)
-                for a in range(bel.means.shape[1])
+                EV.bin_probs(np.array([0.0]), wld.sigma, pool, bel.bets.edges)[0]
+                for pool in wld.pools
             ]
         )
-    return wld.pbins
+    return float(wld.healthy_bins[a] @ bel.bets.log_f_bins(a, w))
 
 
-def expected_log_f(pi: np.ndarray, a: int, bel: Belief, wld: World) -> float:
-    """E[log f_a] under the current posterior (states include h0), with the bet it would use."""
-    lf = bel.bets.log_f_bins(a, bel.bets.weights(pi, bel.hyp))
-    return float(pi @ (policy_bins(bel, wld)[a] @ lf))
-
-
-def evidence_order(pi: np.ndarray, unused: list[int], bel: Belief, wld: World) -> int:
+def evidence_order(pi: np.ndarray, unused: list[int], bel: Belief) -> int:
     """D97, before a flag: argmax over unused probes of expected log f per second. Telemetry adds no
     e-value, so its value is 0."""
     na = bel.means.shape[1]
-    key = ("ev", wld.pool_key, tuple(unused), np.round(pi, 7).tobytes())
+    key = ("ev", tuple(unused), np.round(pi, 7).tobytes())
     if key in bel.cache:
         return bel.cache[key]
     best, best_v = unused[0], -np.inf
     for a in unused:
-        v = expected_log_f(pi, a, bel, wld) / bel.cost[a] if a < na else 0.0
+        v = expected_log_f(pi, a, bel) / bel.cost[a] if a < na else 0.0
         if v > best_v + 1e-12:
             best, best_v = a, v
     if len(bel.cache) < 200_000:
@@ -124,7 +125,7 @@ def next_probe(pi, unused, bel: Belief, pol: Policy, rng, wld=None, flagged=Fals
     if pol.probes == "stage":
         if flagged:
             return gain_order(pi, unused, bel, True)
-        return evidence_order(pi, unused, bel, wld)
+        return evidence_order(pi, unused, bel)
     if pol.probes == "ig_unit":
         return gain_order(pi, unused, bel, False)
     if pol.probes == "random":
@@ -132,14 +133,16 @@ def next_probe(pi, unused, bel: Belief, pol: Policy, rng, wld=None, flagged=Fals
     return unused[0]  # battery: pre-planned order
 
 
-def investigate(n, t, budget, bel: Belief, wld: World, pol: Policy, rng, flagged=False) -> dict:
+def investigate(
+    n, t, budget, bel: Belief, wld: World, pol: Policy, rng, flagged=False, log_growth=False
+) -> dict:
     """One investigation from pi0 (D90). Returns its outcome and the log-evidence it adds."""
     pi = bel.pi0
     h = BY.marginal(pi, bel.hyp)
     na = bel.means.shape[1]
     unused = list(range(len(bel.cost)))
     state = int(wld.cause[n]) if t >= wld.onset_idx[n] else 0
-    spent, dlog, seq, cut = 0.0, 0.0, [], False
+    spent, dlog, seq, cut, hg = 0.0, 0.0, [], False, []
     while unused:
         a = next_probe(pi, unused, bel, pol, rng, wld, flagged)
         c = float(bel.cost[a])
@@ -152,7 +155,10 @@ def investigate(n, t, budget, bel: Belief, wld: World, pol: Policy, rng, flagged
         if a < na:
             y = float(rng.normal(wld.means[state, a], wld.sigma))
             p = float(conformal_p(np.array([y]), wld.pools[a], rng.uniform(size=1))[0])
-            g = bel.bets.mixture(a, bel.bets.weights(pi, bel.hyp))  # before this probe's update
+            w = bel.bets.weights(pi, bel.hyp)  # before this probe's update
+            g = bel.bets.mixture(a, w)
+            if state == 0 and log_growth:
+                hg.append(fixed_pool_healthy_growth(a, w, bel, wld))
             dlog += float(np.log(bel.bets.f(np.array([p]), g)[0]))
             pi = BY.update_gauss(pi, bel.means[:, a], bel.sigma, y)
         else:
@@ -173,6 +179,7 @@ def investigate(n, t, budget, bel: Belief, wld: World, pol: Policy, rng, flagged
         "pi_max": float(h.max()),
         "state": state,
         "flagged": flagged,
+        "healthy_growth": hg,
     }
 
 
@@ -185,8 +192,10 @@ def run_policy(
     alpha: float,
     m: int,
     exclude_blocks: int,
+    log_growth: bool = False,
 ) -> tuple[np.ndarray, list[dict]]:
-    """Returns log E (n_evals, n_nodes) and the list of investigations with probes run."""
+    """Returns log E (n_evals, n_nodes) and the list of investigations with probes run.
+    log_growth: record, per probe on a healthy node, the fixed-pool healthy growth of its bet."""
     T, n_nodes = logM.shape
     logE = logM.copy()
     if pol.B <= 0:
@@ -216,7 +225,7 @@ def run_policy(
             if skip[n]:
                 continue
             fl = bool(flag_t[n]) if flag_t is not None else False
-            r = investigate(n, t, budget, bel, wld, pol, rng, fl)
+            r = investigate(n, t, budget, bel, wld, pol, rng, fl, log_growth)
             budget -= r["seconds"]
             if r["seconds"] > 0:
                 out.append(r)

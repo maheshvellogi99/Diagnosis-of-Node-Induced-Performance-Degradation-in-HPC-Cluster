@@ -67,6 +67,7 @@ class Bets:
     edges: np.ndarray
     beta: float
     per_state: bool = False
+    P: np.ndarray | None = None  # (probe, state incl. h0, bin): P(bin) averaged over pools (D103)
 
     def weights(self, pi: np.ndarray, hyp: np.ndarray) -> np.ndarray:
         """Bet weights from the current posterior over states: pi(component | not h0)."""
@@ -110,24 +111,30 @@ def build_state_bets(m: ProbeModel, ec: dict, s_grid, rng: np.random.Generator) 
     edges = np.asarray(ec["edges"], float)
     n, n_pools = ec["n_pool"], ec["bet_pools"]
     pools = rng.normal(0, m.sigma, (n_pools, n))
-    means, hyp = state_table(m, s_grid)
-    means = means[hyp > 0]
+    all_means, hyp = state_table(m, s_grid)
+    means = all_means[hyp > 0]
     G = np.ones((len(m.names), len(means), len(edges) - 1))
+    P = np.empty((len(m.names), len(all_means), len(edges) - 1))
     s = -np.sort(-pools, axis=1)
     ov = bin_overlap(n, edges)
     z = np.zeros((n_pools, 1))
     cache: dict[float, np.ndarray] = {}
+
+    def mass(mu: float) -> np.ndarray:
+        if mu not in cache:
+            sf = norm.sf((s - mu) / m.sigma)
+            pr = np.diff(np.concatenate([z, sf, z + 1.0], axis=1), axis=1)
+            x = pr.mean(axis=0) @ ov
+            cache[mu] = x / x.sum()
+        return cache[mu]
+
     for i in range(len(m.names)):
         for j, mu in enumerate(means[:, i]):
-            if mu == 0:
-                continue
-            if mu not in cache:
-                sf = norm.sf((s - mu) / m.sigma)
-                pr = np.diff(np.concatenate([z, sf, z + 1.0], axis=1), axis=1)
-                mass = pr.mean(axis=0) @ ov
-                cache[mu] = mass / mass.sum() / np.diff(edges)
-            G[i, j] = cache[mu]
-    return Bets(G, edges, float(ec["beta"]), per_state=True)
+            if mu != 0:
+                G[i, j] = mass(mu) / np.diff(edges)
+        for j, mu in enumerate(all_means[:, i]):
+            P[i, j] = mass(float(mu))
+    return Bets(G, edges, float(ec["beta"]), per_state=True, P=P)
 
 
 def conditional_mean(

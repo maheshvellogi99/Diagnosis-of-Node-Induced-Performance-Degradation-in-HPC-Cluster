@@ -616,18 +616,41 @@ def test_state_weights_from_joint_posterior(sbets, model):
     assert sbets.weights(pi2, hyp)[2] == 1
 
 
-def test_expected_log_f_matches_draws(model, sbets):
+def test_expected_log_f_is_pool_averaged(model, sbets):
+    """D103: expected log f uses P(bin) averaged over independent pools, not the fixed pool."""
     bel = make_belief(model, sbets)
-    wld = make_world(model, n_pool=200)
     rng = np.random.default_rng(3)
     pi = bel.pi0
     a = model.names.index("cache")
-    exact = SIM.expected_log_f(pi, a, bel, wld)
-    st = rng.choice(len(pi), 400_000, p=pi)
+    exact = SIM.expected_log_f(pi, a, bel)
+    n = 60_000
+    st = rng.choice(len(pi), n, p=pi)
     x = rng.normal(bel.means[st, a], bel.sigma)
-    p = EV.conformal_p(x, wld.pools[a], rng.uniform(size=len(x)))
+    pools = rng.normal(0, bel.sigma, (n, EC["n_pool"]))
+    p = ((pools > x[:, None]).sum(axis=1) + rng.uniform(size=n)) / (EC["n_pool"] + 1)
     g = sbets.mixture(a, sbets.weights(pi, bel.hyp))
-    assert exact == pytest.approx(np.log(sbets.f(p, g)).mean(), abs=0.01)
+    assert exact == pytest.approx(np.log(sbets.f(p, g)).mean(), abs=0.02)
+
+
+def test_pool_averaged_healthy_bins_are_bin_widths(model):
+    # h0: p is uniform over pools, so P(bin) averaged over many pools is the bin width
+    ec = {**EC, "n_pool": 50, "bet_pools": 20_000}
+    sb = EV.build_state_bets(model, ec, S_GRID, np.random.default_rng(4))
+    assert np.allclose(sb.P[:, 0], np.diff(sb.edges), rtol=0.03)
+
+
+def test_healthy_growth_logged_only_for_healthy_nodes(model, sbets):
+    bel = make_belief(model, sbets)
+    wld = make_world(model, cause=[1, 0, 0, 0, 0, 0], onset=[0, 9, 9, 9, 9, 9], s=2.0)
+    logM = np.zeros((4, 6))
+    logM[:, 0] = 3.0
+    _, inv = SIM.run_policy(
+        logM, bel, wld, SIM.Policy("p", 7200), np.random.default_rng(1), 0.1, 6, 28, True
+    )
+    for r in inv:
+        n_micro = sum(a < 4 for a in r["seq"])
+        assert len(r["healthy_growth"]) == (n_micro if r["state"] == 0 else 0)
+        assert all(v < 0.01 for v in r["healthy_growth"])
 
 
 # ------------------------------------------------------------------ D97 stage-wise choice
@@ -635,13 +658,12 @@ def test_expected_log_f_matches_draws(model, sbets):
 
 def test_evidence_order_toy(model, sbets):
     bel = make_belief(model, sbets)
-    wld = make_world(model, n_pool=200)
     pi = np.zeros(25)
     pi[1 + S_GRID.index(2.0)] = 1.0  # cause cpu, s = 2
-    a = SIM.evidence_order(pi, [0, 1, 2, 3, 4], bel, wld)
+    a = SIM.evidence_order(pi, [0, 1, 2, 3, 4], bel)
     assert model.names[a] == "cpu"
     healthy = BY.prior(bel.hyp, 0.999)
-    assert SIM.evidence_order(healthy, [0, 1, 2, 3, 4], bel, wld) == 4  # all lose: telemetry
+    assert SIM.evidence_order(healthy, [0, 1, 2, 3, 4], bel) == 4  # all lose: telemetry
 
 
 def test_stage_uses_ig_only_when_flagged(model, sbets):
@@ -651,7 +673,7 @@ def test_stage_uses_ig_only_when_flagged(model, sbets):
     rng = np.random.default_rng(0)
     pi, un = bel.pi0, [0, 1, 2, 3, 4]
     assert SIM.next_probe(pi, un, bel, pol, rng, wld, True) == SIM.gain_order(pi, un, bel, True)
-    assert SIM.next_probe(pi, un, bel, pol, rng, wld, False) == SIM.evidence_order(pi, un, bel, wld)
+    assert SIM.next_probe(pi, un, bel, pol, rng, wld, False) == SIM.evidence_order(pi, un, bel)
 
 
 def test_stage_policy_sees_flags(model, sbets):
