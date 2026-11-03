@@ -211,7 +211,13 @@ def main() -> None:
         n = sum(h["n"] for h in hs)
         return [f"{NAME.get(p, p)}, {variant}", f"{n:,}", f"{max(h['max'] for h in hs):+.4f}", f"{max(h['q99'] for h in hs):+.4f}", f"{sum(h['mean'] * h['n'] for h in hs) / n:+.3f}", f"{sum(h['n_gt_0'] for h in hs) / n:.5f}"]
 
-    gg_tab = table(["Rule, pools", "probes on healthy nodes", "max", "largest per-run q99", "mean", "share > 0"], [grid_growth(p, v) for p in ("ig", "stage") for v in ("main", "pool_redraw")])
+    gg_vals = {(p, v): grid_growth(p, v) for p in ("ig", "stage") for v in ("main", "pool_redraw")}
+    gg_tab = table(["Rule, pools", "probes on healthy nodes", "max", "largest per-run q99", "mean", "share > 0"], list(gg_vals.values()))
+
+    # ---------------- D96 strict check summary (n_pool 1000)
+    h96 = d96["1000"]["healthy"]
+    s96 = [h["fresh_pools_share_max_gt_0"] for h in h96]
+    m96 = max(h96, key=lambda h: h["max_over_simplex"])
 
     # ---------------- D96 vs Phase 5 bets at s = 1.1
     c96 = d96["1000"]["cause"]
@@ -281,8 +287,11 @@ More degraded nodes, KM F(14 d), {NAME[SEL]}:
 
 {k_tab}
 
-**D96 fixes the loss at s = 1.1.** Recall at s = 1.1 is {F(SEL, 0, s=1.1)['recall_end']:.3f} at B = 0 and {F(SEL, 300, s=1.1)['recall_end']:.3f} at B = 300. Phase 5 had
-0.335 and 0.205 under D86 with the old bets. Mean log f on the fixed pool for a probe on its own cause at s = 1.1, run {a.d96}:
+**s = 1.1 is still not solved.** With D96 bets, probes no longer lower recall at B = 300. Recall at trace end is {F(SEL, 0, s=1.1)['recall_end']:.3f} at
+B = 0, {F(SEL, 300, s=1.1)['recall_end']:.3f} at B = 300 and {F(SEL, 1800, s=1.1)['recall_end']:.3f} at B = 1800. Phase 5 had 0.335 at B = 0 and 0.205 at B = 300,
+under D86 with the old bets (reports/phase_5.md, §2). At B = 7200, though, recall falls back to {F(SEL, 7200, s=1.1)['recall_end']:.3f}, and
+F(14 d) at s = 1.1 is at most {max(F(SEL, B, s=1.1)['km_F14'] for B in (0, 60, 300, 1800, 7200)):.3f} at every budget. Why recall drops at B = 7200 was not
+measured: UNKNOWN — needs check. Mean log f on the fixed pool for a probe on its own cause at s = 1.1, run {a.d96}:
 
 {low}
 
@@ -292,7 +301,7 @@ More degraded nodes, KM F(14 d), {NAME[SEL]}:
 
 {d_tab}
 
-Outputs at B = 7200, all K and s, flagged degraded nodes:
+Outputs at B = 7200, all K and s, flagged degraded nodes. Cause mem is not injected as a slowdown (D30), so it has no row:
 
 {conf_tab}
 
@@ -320,12 +329,14 @@ And in the grid itself, probes on healthy nodes:
 
 {gg_tab}
 
-D97 still uses some bets with positive conditional growth on the fixed pool, even with D103. They are rare and small, and IG-only uses none.
+Both rules sometimes use bets with positive conditional growth on the fixed pool, even with D103. IG-only does so rarely: share {gg_vals[("ig", "main")][5]},
+max {gg_vals[("ig", "main")][2]} in the grid, never in the 20,000 checked investigations. D97 does so more often: share {gg_vals[("stage", "main")][5]}, max {gg_vals[("stage", "main")][2]}.
 Validity is judged by P(ever), §2.
 
 **D104 disclosure.** Phase 5's D87 check tested only a few bets. Under the full search the Phase 5 per-cause bets also reach
 {reach['phase5_bets_simplex_max']['mbw']:+.4f} (mbw) and {reach['phase5_bets_simplex_max']['mem']:+.4f} (mem) nats per probe on the fixed pools (run {a.reach}).
-The strict D96 check (run {a.d96}) found the D96 bets at most +0.0035 (mbw); 39–76% of fresh 1000-run pools have a positive maximum.
+The strict D96 check (run {a.d96}) found the D96 bets reach at most {m96['max_over_simplex']:+.4f} ({m96['probe']}) on the fixed n_pool = 1000 pools, and
+{min(s96):.0%}–{max(s96):.0%} of fresh 1000-run pools have a positive maximum.
 
 ## 6. Telemetry classifier and Prodigy
 
