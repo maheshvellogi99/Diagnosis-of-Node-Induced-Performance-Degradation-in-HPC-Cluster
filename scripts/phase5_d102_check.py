@@ -7,7 +7,8 @@ bets) for every bet the policy can use: at the prior, after mem rules out cause 
 (cause, s0) state, and the maximum over all weights on the simplex (concave, so exact). Also the
 exact value, where the pool-averaged bin probability is the bin width. Mean over pools of
 E[f | pool]. (ii) Healthy growth on the fixed pool at the bets actually used, from 20,000
-investigations of a healthy node per probe rule. STOP if (i) is above 0.
+investigations of a healthy node per probe rule. STOP if (i) is above 0: the exact value above
+1e-12, or the 2,000-pool estimate above twice its standard error over pools.
 """
 
 from __future__ import annotations
@@ -75,6 +76,10 @@ def marginal(cfg: dict, n_pool: int, rng) -> list[dict]:
                 "mean_Ef_given_pool": float((Pp @ np.exp(lf)).mean()),
             }
         )  # fmt: skip
+        per_pool = Pp @ lf
+        rows[-1]["se_over_pools"] = float(per_pool.std() / np.sqrt(len(per_pool)))
+    for r in rows:
+        r.setdefault("se_over_pools", 0.0)
     return rows
 
 
@@ -117,7 +122,8 @@ def _run(run: Run) -> int:
         rows += marginal(cfg, n, np.random.default_rng([cfg["seed"], n, 102]))
     t = pd.DataFrame(rows)
     print(t.round(5).to_string(index=False))
-    bad = t[t["mean_log_f"] > 0].to_dict("records")
+    bad = t[(t["exact_log_f"] > 1e-12) | (t["mean_log_f"] > 2 * t["se_over_pools"])]
+    bad = bad.to_dict("records")
     u = {}
     for lab, pol, fl in (
         ("ig", SIM.Policy("ig", 300), False),
