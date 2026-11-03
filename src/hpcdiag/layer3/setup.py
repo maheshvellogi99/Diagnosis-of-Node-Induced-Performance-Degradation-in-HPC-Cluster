@@ -24,8 +24,9 @@ class Variant:
     redraw_pool: bool = False  # D88
     misspec: bool = False  # outcomes from a perturbed table and true_sigma; pool at true_sigma
     true_sigma: float = 0.1
-    tel_belief: str = "oof"  # oof | crossblock | design: matrix the posterior uses
-    tel_world: str = "oof"  # matrix outcomes are drawn from
+    tel_belief: str = "crossblock"  # crossblock (D98) | oof | design: matrix the posterior uses
+    tel_world: str = "crossblock"  # matrix outcomes are drawn from
+    bets: str = "state"  # state: over (cause, s0) (D96) | cause13: per cause at s0 = 1.3 (D87)
 
 
 VARIANTS = {
@@ -37,9 +38,10 @@ VARIANTS = {
     "pi0_0.1": Variant("pi0_0.1", pi0_h0=0.1),
     "pi0_0.9": Variant("pi0_0.9", pi0_h0=0.9),
     "misspec": Variant("misspec", misspec=True),
-    "tel_crossblock": Variant("tel_crossblock", tel_belief="crossblock", tel_world="crossblock"),
+    "tel_oof": Variant("tel_oof", tel_belief="oof", tel_world="oof"),
     "tel_design": Variant("tel_design", tel_belief="design", tel_world="design"),
     "tel_transfer": Variant("tel_transfer", tel_belief="oof", tel_world="crossblock"),
+    "bets_cause13": Variant("bets_cause13", bets="cause13"),
 }
 
 
@@ -77,7 +79,11 @@ def make_belief(cfg: dict, v: Variant) -> Belief:
     pc, ec, po = cfg["probes"], cfg["evalue"], cfg["policy"]
     m = policy_model(pc, v)
     n_pool = v.n_pool or ec["n_pool"]
-    bets = EV.build_bets(m, {**ec, "n_pool": n_pool}, np.random.default_rng([cfg["seed"], n_pool]))
+    rng = np.random.default_rng([cfg["seed"], n_pool])
+    if v.bets == "state":
+        bets = EV.build_state_bets(m, {**ec, "n_pool": n_pool}, po["s_grid"], rng)
+    else:
+        bets = EV.build_bets(m, {**ec, "n_pool": n_pool}, rng)
     means, hyp = PR.state_table(m, po["s_grid"])
     z, w = np.polynomial.hermite_e.hermegauss(po["gh_nodes"])
     return Belief(
@@ -125,4 +131,5 @@ def make_world(
         conf=telemetry_rows(cfg, v.tel_world),
         cause=cause,
         onset_idx=onset_idx,
+        pool_key=hash(tuple(key)) if not v.misspec else hash((*key, sigma)),
     )

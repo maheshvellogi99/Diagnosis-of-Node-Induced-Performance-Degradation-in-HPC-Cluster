@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 
 from hpcdiag.layer3 import evalue as EV
 from hpcdiag.layer3.probes import CAUSES, ProbeModel
@@ -32,9 +33,7 @@ def growth_table(m: ProbeModel, bets: EV.Bets, pools: dict, s_grid) -> pd.DataFr
             for c in CAUSES:
                 for s in s_grid:
                     v = EV.conditional_mean(lf, m.delta(c, a, s), m.sigma, pool, bets.edges)[0]
-                    rows.append(
-                        {"probe": a, "bet": label, "state": c, "s": s, "growth": float(v)}
-                    )
+                    rows.append({"probe": a, "bet": label, "state": c, "s": s, "growth": float(v)})
     return pd.DataFrame(rows)
 
 
@@ -64,3 +63,38 @@ def pool_table(
                 }
             )
     return pd.DataFrame(rows)
+
+
+def max_growth_simplex(P: np.ndarray, G: np.ndarray, beta: float) -> tuple[float, np.ndarray]:
+    """max over bet weights w on the simplex of sum_b P_b log((1 - beta) + beta (w @ G)_b).
+
+    The objective is concave in w, so a local maximum is global; SLSQP from the centre, checked
+    against every vertex. P: bin probabilities (n_bins,); G: densities (K, n_bins)."""
+    K = len(G)
+
+    def obj(w):
+        return -float(P @ np.log((1 - beta) + beta * (w @ G)))
+
+    def grad(w):
+        f = (1 - beta) + beta * (w @ G)
+        return -beta * (G @ (P / f))
+
+    best_v, best_w = -np.inf, None
+    for k in range(K):
+        v = -obj(np.eye(K)[k])
+        if v > best_v:
+            best_v, best_w = v, np.eye(K)[k]
+    r = minimize(
+        obj,
+        np.full(K, 1 / K),
+        jac=grad,
+        method="SLSQP",
+        bounds=[(0, 1)] * K,
+        constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1, "jac": lambda w: np.ones(K)}],
+        options={"maxiter": 500, "ftol": 1e-12},
+    )
+    w = np.clip(r.x, 0, None)
+    w /= w.sum()
+    if -obj(w) > best_v:
+        best_v, best_w = -obj(w), w
+    return best_v, best_w

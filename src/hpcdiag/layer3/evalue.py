@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import norm
 
-from hpcdiag.layer3.probes import CAUSES, ProbeModel
+from hpcdiag.layer3.probes import CAUSES, ProbeModel, state_table
 
 
 def conformal_p(x: np.ndarray, pool: np.ndarray, theta: np.ndarray) -> np.ndarray:
@@ -52,13 +52,33 @@ def density(mu: float, sigma: float, pools: np.ndarray, edges: np.ndarray) -> np
     return mass / np.diff(edges)
 
 
+def bin_probs(means: np.ndarray, sigma: float, pool: np.ndarray, edges: np.ndarray) -> np.ndarray:
+    """P(p in bin | pool) for x ~ N(mean, sigma^2), one row per mean. pool: one pool (n,)."""
+    ov = bin_overlap(len(pool), edges)
+    return np.vstack([rank_probs(float(mu), sigma, pool[None, :])[0] @ ov for mu in means])
+
+
 @dataclass(frozen=True)
 class Bets:
-    """G[a, c, b]: density of p for probe a, cause c (order of CAUSES), bin b."""
+    """G[a, c, b]: density of p for probe a, component c, bin b. Components are the causes (order of
+    CAUSES; D87) or, with per_state, the (cause, s0) states of the posterior without h0 (D96)."""
 
     G: np.ndarray
     edges: np.ndarray
     beta: float
+    per_state: bool = False
+
+    def weights(self, pi: np.ndarray, hyp: np.ndarray) -> np.ndarray:
+        """Bet weights from the current posterior over states: pi(component | not h0)."""
+        if self.per_state:
+            w = pi[hyp > 0]
+        else:
+            w = np.array([pi[hyp == i].sum() for i in range(1, len(CAUSES) + 1)])
+        return w / w.sum()
+
+    def log_f_bins(self, a: int, w: np.ndarray) -> np.ndarray:
+        """log f on each bin for probe a under weights w."""
+        return np.log((1 - self.beta) + self.beta * self.mixture(a, w))
 
     def mixture(self, a: int, w: np.ndarray) -> np.ndarray:
         """g_a = sum_c w_c g_{a,c}; w sums to 1."""
@@ -82,6 +102,32 @@ def build_bets(m: ProbeModel, ec: dict, rng: np.random.Generator) -> Bets:
             if mu != 0:
                 G[i, j] = density(mu, m.sigma, pools, edges)
     return Bets(G, edges, float(ec["beta"]))
+
+
+def build_state_bets(m: ProbeModel, ec: dict, s_grid, rng: np.random.Generator) -> Bets:
+    """D96: one density per probe and (cause, s0) state, in the order of state_table without h0,
+    each over the same independent pools and integrating to exactly 1. Zero shift: density 1."""
+    edges = np.asarray(ec["edges"], float)
+    n, n_pools = ec["n_pool"], ec["bet_pools"]
+    pools = rng.normal(0, m.sigma, (n_pools, n))
+    means, hyp = state_table(m, s_grid)
+    means = means[hyp > 0]
+    G = np.ones((len(m.names), len(means), len(edges) - 1))
+    s = -np.sort(-pools, axis=1)
+    ov = bin_overlap(n, edges)
+    z = np.zeros((n_pools, 1))
+    cache: dict[float, np.ndarray] = {}
+    for i in range(len(m.names)):
+        for j, mu in enumerate(means[:, i]):
+            if mu == 0:
+                continue
+            if mu not in cache:
+                sf = norm.sf((s - mu) / m.sigma)
+                pr = np.diff(np.concatenate([z, sf, z + 1.0], axis=1), axis=1)
+                mass = pr.mean(axis=0) @ ov
+                cache[mu] = mass / mass.sum() / np.diff(edges)
+            G[i, j] = cache[mu]
+    return Bets(G, edges, float(ec["beta"]), per_state=True)
 
 
 def conditional_mean(

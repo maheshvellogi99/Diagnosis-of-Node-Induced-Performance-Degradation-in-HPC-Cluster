@@ -264,9 +264,7 @@ def test_expected_entropy_matches_brute_force(model, bets, a):
     bel = make_belief(model, bets)
     rng = np.random.default_rng(a)
     z, w = np.polynomial.hermite_e.hermegauss(31)
-    e = BY.expected_entropy_gauss(
-        bel.pi0, bel.means[:, a], bel.sigma, bel.hyp, z, w / w.sum()
-    )
+    e = BY.expected_entropy_gauss(bel.pi0, bel.means[:, a], bel.sigma, bel.hyp, z, w / w.sum())
     assert e == pytest.approx(
         _brute_force_entropy(bel.pi0, bel.means[:, a], bel.sigma, bel.hyp, rng), abs=0.02
     )
@@ -275,9 +273,7 @@ def test_expected_entropy_matches_brute_force(model, bets, a):
 def test_identical_rows_have_no_gain(model, bets):
     bel = make_belief(model, bets)
     h = float(BY.entropy(BY.marginal(bel.pi0, bel.hyp)))
-    e = BY.expected_entropy_gauss(
-        bel.pi0, np.zeros(len(bel.pi0)), bel.sigma, bel.hyp, bel.z, bel.w
-    )
+    e = BY.expected_entropy_gauss(bel.pi0, np.zeros(len(bel.pi0)), bel.sigma, bel.hyp, bel.z, bel.w)
     assert e == pytest.approx(h)
     flat = np.full((5, 5), 0.2)
     assert BY.expected_entropy_tel(bel.pi0, bel.hyp, flat) == pytest.approx(h)
@@ -393,7 +389,7 @@ def test_cleared_nodes_excluded_seven_days(model, bets):
 
 def test_uncleared_node_stays_eligible(model, bets):
     # node 0 degraded from the start: D86 investigates it again in the next block
-    pol = SIM.Policy("p", 300)
+    pol = SIM.Policy("p", 300, exclusion="cleared")
     _, inv = _run(model, bets, pol, cause=[1, 0, 0, 0, 0, 0], onset=[0, 9, 9, 9, 9, 9], s=2.0)
     ts = [r["t"] for r in inv if r["node"] == 0]
     assert ts[:3] == [0, 1, 2]
@@ -497,9 +493,7 @@ def test_null_combined_process_mean_one_with_fresh_pools(model):
     pol = SIM.Policy("p", 300)
     tot, n_sim = [], 6000
     for _ in range(n_sim):
-        wld = make_world(
-            model, n_nodes=1, n_pool=50, seed=int(rng.integers(1 << 31))
-        )
+        wld = make_world(model, n_nodes=1, n_pool=50, seed=int(rng.integers(1 << 31)))
         r = SIM.investigate(0, 0, 1000, bel, wld, pol, rng)
         tot.append(r["dlog"])
     e = np.exp(np.array(tot))
@@ -574,6 +568,7 @@ def test_telemetry_variants_use_their_matrices():
     assert oof[1, 1] > 0.99 and cross[0, 0] < 0.9 and design[1, 1] == 0.8
     v = ST.VARIANTS["tel_transfer"]
     assert (ST.make_belief(cfg, v).conf == oof).all()
+    assert (ST.make_belief(cfg, ST.VARIANTS["tel_oof"]).conf == oof).all()
     w = ST.make_world(cfg, v, 1.3, np.zeros(2, int), np.zeros(2, int), 1, 2)
     assert (w.conf == cross).all()
 
@@ -582,3 +577,131 @@ def test_config_keeps_null_kind():
     from hpcdiag.utils.run import load_config
 
     assert load_config("configs/phase5.yaml")["grid"]["validity_kinds"][0] == "null"
+
+
+# ------------------------------------------------------------------ D96 bets over (cause, s0)
+
+
+@pytest.fixture(scope="module")
+def sbets(model):
+    return EV.build_state_bets(model, EC, S_GRID, np.random.default_rng(0))
+
+
+def test_state_bets_shape_and_integral(sbets, model):
+    assert sbets.G.shape == (4, 24, 10) and sbets.per_state
+    assert np.allclose(sbets.G @ np.diff(sbets.edges), 1)
+    means, hyp = PR.state_table(model, S_GRID)
+    means = means[hyp > 0]
+    for a in range(4):
+        flat = means[:, a] == 0
+        assert (sbets.G[a, flat] == 1).all()  # zero shift: exactly uniform
+
+
+def test_state_bet_equals_density(sbets, model):
+    rng = np.random.default_rng(0)
+    pools = rng.normal(0, model.sigma, (EC["bet_pools"], EC["n_pool"]))
+    a = model.names.index("cpu")
+    j = 1 * 0 + S_GRID.index(1.3)  # cause cpu is the first cause block
+    g = EV.density(model.delta("cpu", "cpu", 1.3), model.sigma, pools, sbets.edges)
+    assert np.allclose(sbets.G[a, j], g)
+
+
+def test_state_weights_from_joint_posterior(sbets, model):
+    _, hyp = PR.state_table(model, S_GRID)
+    pi = BY.prior(hyp, 0.5)
+    w = sbets.weights(pi, hyp)
+    assert w.shape == (24,) and np.allclose(w, 1 / 24)
+    pi2 = np.zeros(25)
+    pi2[0], pi2[3] = 0.5, 0.5
+    assert sbets.weights(pi2, hyp)[2] == 1
+
+
+def test_expected_log_f_matches_draws(model, sbets):
+    bel = make_belief(model, sbets)
+    wld = make_world(model, n_pool=200)
+    rng = np.random.default_rng(3)
+    pi = bel.pi0
+    a = model.names.index("cache")
+    exact = SIM.expected_log_f(pi, a, bel, wld)
+    st = rng.choice(len(pi), 400_000, p=pi)
+    x = rng.normal(bel.means[st, a], bel.sigma)
+    p = EV.conformal_p(x, wld.pools[a], rng.uniform(size=len(x)))
+    g = sbets.mixture(a, sbets.weights(pi, bel.hyp))
+    assert exact == pytest.approx(np.log(sbets.f(p, g)).mean(), abs=0.01)
+
+
+# ------------------------------------------------------------------ D97 stage-wise choice
+
+
+def test_evidence_order_toy(model, sbets):
+    bel = make_belief(model, sbets)
+    wld = make_world(model, n_pool=200)
+    pi = np.zeros(25)
+    pi[1 + S_GRID.index(2.0)] = 1.0  # cause cpu, s = 2
+    a = SIM.evidence_order(pi, [0, 1, 2, 3, 4], bel, wld)
+    assert model.names[a] == "cpu"
+    healthy = BY.prior(bel.hyp, 0.999)
+    assert SIM.evidence_order(healthy, [0, 1, 2, 3, 4], bel, wld) == 4  # all lose: telemetry
+
+
+def test_stage_uses_ig_only_when_flagged(model, sbets):
+    bel = make_belief(model, sbets)
+    wld = make_world(model, n_pool=200)
+    pol = SIM.Policy("s", 300, probes="stage")
+    rng = np.random.default_rng(0)
+    pi, un = bel.pi0, [0, 1, 2, 3, 4]
+    assert SIM.next_probe(pi, un, bel, pol, rng, wld, True) == SIM.gain_order(pi, un, bel, True)
+    assert SIM.next_probe(pi, un, bel, pol, rng, wld, False) == SIM.evidence_order(pi, un, bel, wld)
+
+
+def test_stage_policy_sees_flags(model, sbets):
+    bel = make_belief(model, sbets)
+    wld = make_world(model, cause=[1, 0, 0, 0, 0, 0], onset=[0, 9, 9, 9, 9, 9], s=2.0)
+    logM = np.zeros((6, 6))
+    logM[:, 0] = 30.0
+    pol = SIM.Policy("s", 300, probes="stage")
+    _, inv = SIM.run_policy(logM, bel, wld, pol, np.random.default_rng(1), 0.1, 6, 28)
+    assert all(r["flagged"] == (r["node"] == 0) for r in inv)
+
+
+def test_null_combined_process_state_bets_fresh_pools(model):
+    """Null with D96 bets and the stage rule: E[exp(sum log f)] = 1 with a fresh pool per run."""
+    ec = {**EC, "n_pool": 50, "edges": [0, 0.02, 0.05, 0.1, 0.2, 0.5, 1], "bet_pools": 400}
+    sb = EV.build_state_bets(model, ec, S_GRID, np.random.default_rng(1))
+    bel = make_belief(model, sb)
+    rng = np.random.default_rng(9)
+    pol = SIM.Policy("s", 300, probes="stage")
+    tot, n_sim = [], 4000
+    for _ in range(n_sim):
+        wld = make_world(model, n_nodes=1, n_pool=50, seed=int(rng.integers(1 << 31)))
+        tot.append(SIM.investigate(0, 0, 1000, bel, wld, pol, rng)["dlog"])
+    e = np.exp(np.array(tot))
+    assert e.mean() == pytest.approx(1, abs=4 * e.std() / np.sqrt(n_sim))
+
+
+# ------------------------------------------------------------------ D96 check helper
+
+
+def test_max_growth_over_simplex():
+    from hpcdiag.layer3 import d87 as D
+
+    rng = np.random.default_rng(0)
+    G = rng.gamma(0.5, 1, (6, 5))
+    G /= G.mean(axis=1, keepdims=True)
+    P = rng.dirichlet(np.ones(5) * 2)
+    v, w = D.max_growth_simplex(P, G, 0.9)
+    assert w.min() >= -1e-9 and w.sum() == pytest.approx(1)
+    W = rng.dirichlet(np.ones(6) * 0.3, 20_000)
+    brute = (P * np.log(0.1 + 0.9 * W @ G)).sum(axis=1).max()
+    assert v >= brute - 1e-6
+    assert v == pytest.approx(float((P * np.log(0.1 + 0.9 * w @ G)).sum()))
+
+
+def test_default_telemetry_is_crossblock():
+    from hpcdiag.layer3 import setup as ST
+    from hpcdiag.utils.run import load_config
+
+    cfg = load_config("configs/phase5.yaml")
+    bel = ST.make_belief(cfg, ST.VARIANTS["main"])
+    assert (bel.conf == ST.telemetry_rows(cfg, "crossblock")).all()
+    assert bel.bets.per_state

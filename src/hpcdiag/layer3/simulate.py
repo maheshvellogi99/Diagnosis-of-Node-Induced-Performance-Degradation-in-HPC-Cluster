@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from hpcdiag.layer3 import bayes as BY
+from hpcdiag.layer3 import evalue as EV
 from hpcdiag.layer3.evalue import Bets, conformal_p
 from hpcdiag.layer3.probes import CAUSES, HYPOTHESES
 from hpcdiag.stats.ebh import ebh_log
@@ -25,8 +26,8 @@ class Policy:
     name: str
     B: float  # node-seconds per day
     nodes: str = "rank"  # rank | random | sweep
-    probes: str = "ig_cost"  # ig_cost | ig_unit | random | battery
-    exclusion: str = "cleared"  # cleared (D86) | all (design) | cleared_skipdone | none
+    probes: str = "ig_cost"  # ig_cost | ig_unit | random | battery | stage (D97)
+    exclusion: str = "cleared_skipdone"  # cleared_skipdone (D95) | cleared (D86) | all | none
 
 
 @dataclass
@@ -56,6 +57,8 @@ class World:
     conf: np.ndarray
     cause: np.ndarray
     onset_idx: np.ndarray  # first evaluation index at or after onset; large = never
+    pool_key: int = 0  # identifies the pools, for caches that depend on them
+    pbins: np.ndarray | None = None  # policy's P(bin | state) on these pools (D97), lazily set
 
 
 def gain_order(pi: np.ndarray, unused: list[int], bel: Belief, by_cost: bool) -> int:
@@ -79,9 +82,49 @@ def gain_order(pi: np.ndarray, unused: list[int], bel: Belief, by_cost: bool) ->
     return best
 
 
-def next_probe(pi, unused, bel: Belief, pol: Policy, rng) -> int:
+def policy_bins(bel: Belief, wld: World) -> np.ndarray:
+    """(n_probes, n_states, n_bins): P(p in bin) under each state of the policy's model, on the
+    pools the p-values are computed against (the policy knows its measured pools)."""
+    if wld.pbins is None:
+        wld.pbins = np.stack(
+            [
+                EV.bin_probs(bel.means[:, a], bel.sigma, wld.pools[a], bel.bets.edges)
+                for a in range(bel.means.shape[1])
+            ]
+        )
+    return wld.pbins
+
+
+def expected_log_f(pi: np.ndarray, a: int, bel: Belief, wld: World) -> float:
+    """E[log f_a] under the current posterior (states include h0), with the bet it would use."""
+    lf = bel.bets.log_f_bins(a, bel.bets.weights(pi, bel.hyp))
+    return float(pi @ (policy_bins(bel, wld)[a] @ lf))
+
+
+def evidence_order(pi: np.ndarray, unused: list[int], bel: Belief, wld: World) -> int:
+    """D97, before a flag: argmax over unused probes of expected log f per second. Telemetry adds no
+    e-value, so its value is 0."""
+    na = bel.means.shape[1]
+    key = ("ev", wld.pool_key, tuple(unused), np.round(pi, 7).tobytes())
+    if key in bel.cache:
+        return bel.cache[key]
+    best, best_v = unused[0], -np.inf
+    for a in unused:
+        v = expected_log_f(pi, a, bel, wld) / bel.cost[a] if a < na else 0.0
+        if v > best_v + 1e-12:
+            best, best_v = a, v
+    if len(bel.cache) < 200_000:
+        bel.cache[key] = best
+    return best
+
+
+def next_probe(pi, unused, bel: Belief, pol: Policy, rng, wld=None, flagged=False) -> int:
     if pol.probes == "ig_cost":
         return gain_order(pi, unused, bel, True)
+    if pol.probes == "stage":
+        if flagged:
+            return gain_order(pi, unused, bel, True)
+        return evidence_order(pi, unused, bel, wld)
     if pol.probes == "ig_unit":
         return gain_order(pi, unused, bel, False)
     if pol.probes == "random":
@@ -89,7 +132,7 @@ def next_probe(pi, unused, bel: Belief, pol: Policy, rng) -> int:
     return unused[0]  # battery: pre-planned order
 
 
-def investigate(n, t, budget, bel: Belief, wld: World, pol: Policy, rng) -> dict:
+def investigate(n, t, budget, bel: Belief, wld: World, pol: Policy, rng, flagged=False) -> dict:
     """One investigation from pi0 (D90). Returns its outcome and the log-evidence it adds."""
     pi = bel.pi0
     h = BY.marginal(pi, bel.hyp)
@@ -98,7 +141,7 @@ def investigate(n, t, budget, bel: Belief, wld: World, pol: Policy, rng) -> dict
     state = int(wld.cause[n]) if t >= wld.onset_idx[n] else 0
     spent, dlog, seq, cut = 0.0, 0.0, [], False
     while unused:
-        a = next_probe(pi, unused, bel, pol, rng)
+        a = next_probe(pi, unused, bel, pol, rng, wld, flagged)
         c = float(bel.cost[a])
         if c > budget - spent:
             cut = True
@@ -109,8 +152,8 @@ def investigate(n, t, budget, bel: Belief, wld: World, pol: Policy, rng) -> dict
         if a < na:
             y = float(rng.normal(wld.means[state, a], wld.sigma))
             p = float(conformal_p(np.array([y]), wld.pools[a], rng.uniform(size=1))[0])
-            cm = h[1:] / h[1:].sum()
-            dlog += float(np.log(bel.bets.f(np.array([p]), bel.bets.mixture(a, cm))[0]))
+            g = bel.bets.mixture(a, bel.bets.weights(pi, bel.hyp))  # before this probe's update
+            dlog += float(np.log(bel.bets.f(np.array([p]), g)[0]))
             pi = BY.update_gauss(pi, bel.means[:, a], bel.sigma, y)
         else:
             o = int(rng.choice(len(HYPOTHESES), p=wld.conf[state]))
@@ -129,6 +172,7 @@ def investigate(n, t, budget, bel: Belief, wld: World, pol: Policy, rng) -> dict
         "cause": int(np.argmax(h[1:])) + 1,
         "pi_max": float(h.max()),
         "state": state,
+        "flagged": flagged,
     }
 
 
@@ -162,13 +206,17 @@ def run_policy(
         else:
             order = (sweep + np.arange(n_nodes)) % n_nodes
         skip = until > t
+        flag_t = None
+        if pol.exclusion == "cleared_skipdone" or pol.probes == "stage":
+            flag_t = ebh_log(logE[t], alpha, m)
         if pol.exclusion == "cleared_skipdone":
-            skip = skip | (ebh_log(logE[t], alpha, m) & done)
+            skip = skip | (flag_t & done)
         for n in order:
             n = int(n)
             if skip[n]:
                 continue
-            r = investigate(n, t, budget, bel, wld, pol, rng)
+            fl = bool(flag_t[n]) if flag_t is not None else False
+            r = investigate(n, t, budget, bel, wld, pol, rng, fl)
             budget -= r["seconds"]
             if r["seconds"] > 0:
                 out.append(r)
