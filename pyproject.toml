@@ -49,3 +49,4 @@ dev = [
 # Phase 6 kit: stand-alone scripts with long usage lines in docstrings; runs on target Pythons < 3.11
 "cluster/*.py" = ["E501"]
 "tests/test_cluster_kit.py" = ["E501"]
+"tests/test_phase6_analysis.py" = ["E501"]  # synthetic log rows
