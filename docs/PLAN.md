@@ -631,9 +631,28 @@ PROMPT 5 in `docs/PHASE_PROMPTS_5_6.md` and LAYER3_DESIGN.md §3–§4. Everythi
   joint posterior of the investigation (predictable: finished probes only) over cause and s0 ∈
   {1.1, 1.2, 1.3, 1.5, 2.0, 3.0}, each g_{a,h,s0} built over 2,000 independent pools and integrating
   to exactly 1. (Phase 5 used per-cause bets at s0 = 1.3 only, D87; they lowered recall at s = 1.1.)
-- 5.3 Combined evidence: multiplying every jumper state by f leaves state proportions unchanged and
-  the jumper update is linear homogeneous, so exactly
-  log E_n(t) = log M_n^{Rn}(t) + Σ_{probes finished by t} log f_a(p). e-BH α = 0.1, m = 980 on E_n.
+- 5.3 Combined evidence (D109, replaces the PHASE5_DESIGN §3 formula). For node n, number its
+  investigations k = 1, 2, ... in time order and let F_i = product of f over the probes of
+  investigation i (telemetry contributes no factor). With N = investigations finished by t,
+  P_n(t) = Σ_{k ≤ N} w_k Π_{i = k..N} F_i + (1 − J)^N,  w_k = J (1 − J)^(k−1),  J = 0.01 (the
+  Layer 2 jumper J), P_n(0) = 1. Recursion per finished investigation: A ← F (A + J R),
+  R ← (1 − J) R, P = A + R, with A_0 = 0, R_0 = 1. Combined evidence
+  log E_n = log M_n^{Rn}(t) + log P_n(t); e-BH α = 0.1, m = 980 on E_n.
+  **Validity (D109).** Write P_n = Σ_{k ≥ 1} w_k T_k with T_k = 1 before investigation k finishes and
+  T_k = Π_{i = k..N} F_i after; Σ_{k > N} w_k = (1 − J)^N gives the formula above, and Σ_k w_k = 1.
+  Under H0_n each probe factor f is conditionally valid given everything before it (§5.2), so
+  E[F_i | past] ≤ 1 by the tower rule over the probes of investigation i; each T_k is therefore a
+  test supermartingale (equal to 1 before it starts), and a mixture with fixed nonnegative weights
+  summing to 1 is a test supermartingale (monotone convergence for the infinite sum). M_n^{Rn} is a
+  test supermartingale over job ends. Probe completions and job ends are distinct events in one
+  time order, so at every event only one factor of E_n = M_n P_n changes, with conditional mean
+  ≤ 1 given the joint past; E_n is a test supermartingale in the joint filtration and the D49
+  stopping-time argument applies unchanged. J = 1 gives w_1 = 1 and P = Π F_i, the old formula.
+  **Design error (D109).** PHASE5_DESIGN §3 applied every probe factor to every jumper state, so
+  log E = log M + Σ log f over all probes ever run. It is valid, but probe evidence never restarts:
+  probes of a healthy node accumulate debt without limit (about −0.22 nats per healthy day at
+  B = 7200, reports/phase_5b.md §10), which costs power after a late onset. This was the
+  architect's design error; the old formula is kept only as a reference row (J = 1).
   **Validity statement (D100):** probe e-values are valid marginally over the draw of the healthy
   pool, as in split conformal prediction: E[f] ≤ 1 when the pool and the new run are exchangeable
   healthy runs, while E[f | pool] for one fixed pool can exceed 1 (Phase 5: up to 4.0 for the mbw
@@ -929,3 +948,7 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D105 | 3 Nov 2026 | Diagnosis only of the s = 1.1 recall drop at B = 7200 against B = 1800: per degraded node, number of investigations, how many ended cleared (π(h0) ≥ 0.95) while degraded, log E before and after each investigation, and whether the 7-day exclusion after a wrong clearing explains the drop. Measure, do not change the design; if a fix seems needed, propose it and STOP | Mahesh |
 | D106 | 3 Nov 2026 | Diagnose the row "IG + design rule, B = 7200, F(14 d) 0.220" (lower than at B = 300): if it is a bug in code the primary configuration also uses, STOP and report before anything else | Mahesh |
 | D107 | 3 Nov 2026 | Disclose in reports/phase_5b.md the four D102 check runs (20261103-151450, -151526, -151555, -151624; marginal_positive 10, 10, 2, 0) and what changed in the code between them, so it is clear the check was corrected, not re-run until it passed. If no fix is needed after D105–D106, tag the primary configuration (Rn(1) Layer 2 + IG-only + D95 + D96 + D98) as v1.0-dev-frozen | Mahesh |
+| D108 | 13 Nov 2026 | D102 stop rule confirmed: pass = exact value ≤ 1e-12 AND Monte-Carlo within max(2 SE, 1e-12); the exact computation is the criterion, Monte-Carlo a cross-check. Process rule: after editing a check script, verify the edit applied before re-running (run 20261103-151526 should not have run) | Mahesh |
+| D109 | 13 Nov 2026 | Probe evidence is a restart mixture over investigations (P1 of reports/phase_5b.md §10.3), decided before any result: P_n = Σ_{k ≤ N} w_k Π_{i = k..N} F_i + (1 − J)^N, w_k = J (1 − J)^(k−1), J = 0.01; recursion A ← F (A + J R), R ← (1 − J) R; log E_n = log M_n + log P_n. Validity proof in §9 Phase 5, 5.3. The old formula (probe factors on every jumper state, PHASE5_DESIGN §3) was the architect's design error; it is J = 1 and kept as a reference row. Tests: P(0) = 1, one-step fairness, recursion = explicit sum, J = 1 = old formula | Mahesh |
+| D110 | 13 Nov 2026 | Development evaluation of the primary (Rn(1) + IG-only + D95 + D96 + D98 + D109), old formula as reference: B ∈ {0, 300, 1800, 7200}, K ∈ {1, 2, 5}%, all s; validity (nulls 0–199, decoy, heavy, shock; fixed pool and pool per base); misspecified rows at B = 300 and 7200. Debt stress test (diagnostic, not a gate): k_pre ∈ {0, 10, 25} extra healthy investigations of each degraded node before onset, old formula vs D109, F(14 d) at K = 1%, s = 1.3, B = 7200 | Mahesh |
+| D111 | 13 Nov 2026 | Freeze rule fixed before results: if every validity row passes α + 2 SE, tag the primary as git tag v1.0-dev-frozen and write docs/FROZEN_CONFIG.md (every parameter, config hash, commit); if any validity row fails, STOP, no tag | Mahesh |

@@ -7,8 +7,9 @@ bets) for every bet the policy can use: at the prior, after mem rules out cause 
 (cause, s0) state, and the maximum over all weights on the simplex (concave, so exact). Also the
 exact value, where the pool-averaged bin probability is the bin width. Mean over pools of
 E[f | pool]. (ii) Healthy growth on the fixed pool at the bets actually used, from 20,000
-investigations of a healthy node per probe rule. STOP if (i) is above 0: the exact value above
-1e-12, or the 2,000-pool estimate above max(twice its standard error over pools, 1e-12).
+investigations of a healthy node per probe rule. Stop rule (D108): pass = exact value <= 1e-12
+AND the 2,000-pool estimate within max(twice its standard error over pools, 1e-12). The exact
+computation is the criterion; Monte-Carlo is a cross-check.
 """
 
 from __future__ import annotations
