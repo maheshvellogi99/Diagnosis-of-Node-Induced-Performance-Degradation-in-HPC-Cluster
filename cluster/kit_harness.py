@@ -241,7 +241,21 @@ class Harness:
         else:
             raise ValueError(f"unknown step type {s['type']!r}")
 
+    def preflight(self) -> dict:
+        """Before the campaign: host gate and campaign size (D119a); raises Refused."""
+        KS.check_host(self.facts, self.approved)
+        return KS.check_campaign_size(self.cfg)
+
     def run_plan(self, plan: list[dict]) -> None:
+        if self.dry:
+            try:
+                sz = KS.check_campaign_size(self.cfg)
+                verdict = "ok"
+            except KS.Refused as e:
+                sz, verdict = KS.campaign_size(int(self.cfg["planned_machines"]), int(self.cfg["planned_days"]),
+                                               int(self.cfg["healthy_batteries_per_day"])), f"REFUSED: {e}"  # fmt: skip
+            self.out(f"campaign size: {sz['fit_runs_per_probe']} fit-day and {sz['test_runs_per_probe']} "
+                     f"test-day healthy runs per probe [{verdict}]")  # fmt: skip
         if not self.dry:
             for s in plan:
                 self.check_probes(s.get("probes", []))
@@ -262,7 +276,7 @@ def main() -> int:
     plan = json.loads(Path(a.plan).read_text())
     h = Harness(cfg, a.log, dry_run=a.dry_run)
     if not a.dry_run:
-        KS.check_host(h.facts, h.approved)  # refuse the whole session on an unapproved host
+        h.preflight()  # refuse the whole session on an unapproved host or an undersized campaign
     h.run_plan(plan)
     return 0
 

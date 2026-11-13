@@ -166,7 +166,8 @@ def test_held_out_accuracy_and_gate6(fitted):
     assert g["s_inside_phase3_range"]["memleak/low"] is False
     assert g["s_inside_phase3_range"]["membw/high"] is True
     assert g["completeness"]["hosts_ge_2"] and g["completeness"]["days_ge_3"]
-    assert g["completeness"]["healthy_runs_per_probe_ge_1000"] is False  # 800 < 1000
+    assert g["completeness"]["fit_healthy_runs_per_probe_ge_1000"] is False  # 800 < 1000 (D119a)
+    assert g["completeness"]["test_healthy_runs_per_probe_ge_300"] is True  # 400 >= 300
     assert g["completeness"]["reps_per_anomaly_intensity_ge_10"] is True  # 2 x 3 x 4 = 24
     assert g["telemetry"] is None  # not passed here; D117 tests below
     tel = AN.telemetry(df, ft, RF, seed=0)
@@ -177,9 +178,9 @@ def test_outputs_feed_the_d113_plumbing(fitted, tmp_path):
     from hpcdiag.freeze import allowed_change, changed_keys
     from hpcdiag.layer3 import setup as ST
 
-    _, ft = fitted
+    df, ft = fitted
     m, kept = AN.model_from_fit(ft, CFG["probes"])
-    AN.write_pool(ft, tmp_path / "pool.csv")
+    AN.write_measured(df, ft, tmp_path / "pool.csv")
     d = AN.d113_inputs(ft, m, kept, str(tmp_path / "pool.csv"))
     cfg = copy.deepcopy(CFG)
     cfg["probes"].update(d["probes"])
@@ -191,6 +192,11 @@ def test_outputs_feed_the_d113_plumbing(fitted, tmp_path):
     first = ft.pool[ft.pool["probe"] == "cpu"].sort_values("t_start")["log_x"].to_numpy()[:300]
     assert np.array_equal(w.pools[0], np.sort(first))
     assert np.allclose(w.sigma, [ft.sigma[a] for a in cfg["probes"]["names"]])
+    mr = AN.measured_runs(df, ft)
+    test_cpu = mr[(mr["probe"] == "cpu") & (mr["split"] == "test")].sort_values(
+        "t_start", kind="stable"
+    )
+    assert np.array_equal(w.noise[0], test_cpu["log_x"].to_numpy())  # D119: outcomes from test days
 
 
 def test_fewer_than_three_days_is_an_error(tmp_path):
@@ -205,10 +211,29 @@ def test_wilson():
 
 
 def test_pool_csv_round_trip(fitted, tmp_path):
-    _, ft = fitted
-    AN.write_pool(ft, tmp_path / "p.csv")
+    df, ft = fitted
+    AN.write_measured(df, ft, tmp_path / "p.csv")
     back = pd.read_csv(tmp_path / "p.csv", float_precision="round_trip")
-    assert np.array_equal(back["log_x"].to_numpy(), ft.pool["log_x"].to_numpy())
+    assert np.array_equal(back["log_x"].to_numpy(), AN.measured_runs(df, ft)["log_x"].to_numpy())
+
+
+def test_measured_runs_split_and_normalisation(fitted):
+    """D119: fit rows = the healthy fit-day pool; test rows = test-day healthy runs, normalised by the
+    FIT-day per-host median (no test-day information in the normalisation)."""
+    df, ft = fitted
+    mr = AN.measured_runs(df, ft)
+    assert set(mr.columns) == {"probe", "log_x", "t_start", "host", "split"}
+    for a in ("cpu", "mbw", "cache", "mem"):
+        assert ((mr["probe"] == a) & (mr["split"] == "fit")).sum() == 800
+        assert ((mr["probe"] == a) & (mr["split"] == "test")).sum() == 400
+    raw = df[(df["event"] == "probe") & (df["condition"] == "healthy") & df["day"].isin(ft.test_days)
+             & (df["probe"] == "cpu") & (df["host"] == "hB")].sort_values("t_start")  # fmt: skip
+    got = mr[(mr["probe"] == "cpu") & (mr["split"] == "test") & (mr["host"] == "hB")].sort_values(
+        "t_start"
+    )
+    assert np.allclose(
+        got["log_x"].to_numpy(), np.log(raw["value"].to_numpy() / ft.baseline[("hB", "cpu")])
+    )
 
 
 def test_cli_on_synthetic_logs(tmp_path):

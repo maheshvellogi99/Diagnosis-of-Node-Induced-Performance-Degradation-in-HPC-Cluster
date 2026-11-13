@@ -8,6 +8,7 @@ placeholder; memleak asks for at most cap_fraction of MemTotal, with cap_fractio
 
 from __future__ import annotations
 
+import math
 import platform
 import socket
 from pathlib import Path
@@ -16,6 +17,8 @@ ALLOWED_ANOMALIES = ("cpuoccupy", "cachecopy", "membw", "memleak")
 FORBIDDEN_ANOMALIES = ("iometadata", "iobandwidth", "netoccupy")
 MEMLEAK_MAX_FRACTION = 0.25  # strict upper bound on the configured cap (D115)
 X86_64 = ("x86_64", "amd64")
+FIT_MIN, TEST_MIN = 1000, 300  # D119(a): healthy runs per probe on fit days / test days
+MIN_MACHINES, MIN_DAYS = 2, 3  # D114
 
 
 class Refused(RuntimeError):
@@ -63,6 +66,43 @@ def check_anomaly(name: str) -> None:
 def check_template(cmd: str) -> None:
     if "UNKNOWN" in cmd:
         raise Refused(f"command still has an UNKNOWN placeholder: {cmd!r}")
+
+
+def campaign_size(machines: int, days: int, batteries_per_day: int) -> dict:
+    """Healthy runs per probe on fit days (the first ceil(2D/3)) and on test days (D119a)."""
+    n_fit = math.ceil(2 * days / 3)
+    return {
+        "fit_runs_per_probe": machines * n_fit * batteries_per_day,
+        "test_runs_per_probe": machines * (days - n_fit) * batteries_per_day,
+    }
+
+
+def min_batteries_per_day(machines: int, days: int) -> int:
+    n_fit = math.ceil(2 * days / 3)
+    return max(
+        math.ceil(FIT_MIN / (machines * n_fit)), math.ceil(TEST_MIN / (machines * (days - n_fit)))
+    )
+
+
+def check_campaign_size(cfg: dict) -> dict:
+    """Refuse a campaign plan that cannot give >= 1000 fit-day and >= 300 test-day healthy runs per
+    probe on >= 2 machines over >= 3 days (D114, D119a). Checked before the campaign starts."""
+    m, d, b = (
+        int(cfg["planned_machines"]),
+        int(cfg["planned_days"]),
+        int(cfg["healthy_batteries_per_day"]),
+    )
+    if m < MIN_MACHINES or d < MIN_DAYS:
+        raise Refused(
+            f"campaign needs >= {MIN_MACHINES} machines and >= {MIN_DAYS} days, plan has {m} and {d}"
+        )
+    sz = campaign_size(m, d, b)
+    if sz["fit_runs_per_probe"] < FIT_MIN or sz["test_runs_per_probe"] < TEST_MIN:
+        raise Refused(
+            f"plan gives {sz['fit_runs_per_probe']} fit-day and {sz['test_runs_per_probe']} test-day healthy runs per "
+            f"probe; needs >= {FIT_MIN} and >= {TEST_MIN} (at least {min_batteries_per_day(m, d)} batteries per day)"
+        )
+    return sz
 
 
 def mem_total_bytes(meminfo_text: str) -> int:

@@ -221,7 +221,9 @@ def fit(df: pd.DataFrame, seed: int = 0, n_boot: int = 2000) -> Fit:
                 None if (len(L) == 0 or np.all(np.abs(L) < L_MIN)) else float((L @ y) / (L @ L))
             )
     pool = (
-        hm[["probe", "log_x", "t_start"]].sort_values(["probe", "t_start"]).reset_index(drop=True)
+        hm[["probe", "log_x", "t_start", "host"]]
+        .sort_values(["probe", "t_start"], kind="stable")
+        .reset_index(drop=True)
     )
     return Fit(fit_days, test_days, sigma, ci, n_h, cost, s, k, shift, pool, base)
 
@@ -303,6 +305,8 @@ def gate6(
     tel: dict | None = None,
 ) -> dict:
     hosts = sorted(df["host"].unique())
+    mr = measured_runs(df, ft)
+    n_test = {a: int(((mr["probe"] == a) & (mr["split"] == "test")).sum()) for a in MEASURED}
     reps = (
         df[(df["event"] == "anomaly_start")].groupby(["anomaly", "intensity"]).size().to_dict()
         if "anomaly_start" in set(df["event"])
@@ -316,6 +320,7 @@ def gate6(
         "sigma": ft.sigma,
         "sigma_ci95": ft.sigma_ci,
         "n_healthy_per_probe": ft.n_healthy,
+        "n_test_healthy_per_probe": n_test,
         "held_out": ho,
         "s": {f"{a}/{i}": v for (a, i), v in ft.s.items()},
         "s_phase3_range": list(s_range),
@@ -323,7 +328,8 @@ def gate6(
             f"{a}/{i}": s_range[0] <= v <= s_range[1] for (a, i), v in ft.s.items()
         },
         "completeness": {
-            "healthy_runs_per_probe_ge_1000": all(n >= 1000 for n in ft.n_healthy.values()),
+            "fit_healthy_runs_per_probe_ge_1000": all(n >= 1000 for n in ft.n_healthy.values()),
+            "test_healthy_runs_per_probe_ge_300": all(n >= 300 for n in n_test.values()),
             "days_ge_3": len(df["day"].dropna().unique()) >= 3,
             "hosts_ge_2": len(hosts) >= 2,
             "reps_per_anomaly_intensity_ge_10": bool(reps)
@@ -351,5 +357,32 @@ def d113_inputs(
     return out
 
 
-def write_pool(ft: Fit, path: Path) -> None:
-    ft.pool.to_csv(path, index=False, float_format="%.17g")
+def measured_runs(df: pd.DataFrame, ft: Fit) -> pd.DataFrame:
+    """D119 measured tables: healthy log x with host and split. fit = the fit-day pool rows; test =
+    test-day healthy runs normalised by the FIT-day per-host median (used only as outcome draws)."""
+    fit = ft.pool.assign(split="fit")
+    t = df[
+        df["day"].isin(ft.test_days)
+        & (df["event"] == "probe")
+        & (df["condition"] == "healthy")
+        & df["probe"].isin(MEASURED)
+    ]
+    test = pd.DataFrame(
+        {
+            "probe": t["probe"].to_numpy(),
+            "log_x": [
+                math.log(v / ft.baseline[(h, a)])
+                for v, h, a in zip(t["value"], t["host"], t["probe"], strict=True)
+            ],
+            "t_start": t["t_start"].to_numpy(),
+            "host": t["host"].to_numpy(),
+            "split": "test",
+        }
+    ).sort_values(["probe", "t_start"], kind="stable")
+    cols = ["probe", "log_x", "t_start", "host", "split"]
+    return pd.concat([fit[cols], test[cols]], ignore_index=True)
+
+
+def write_measured(df: pd.DataFrame, ft: Fit, path: Path) -> None:
+    """The D113 healthy_pool file (D119 measured tables), floats written exactly."""
+    measured_runs(df, ft).to_csv(path, index=False, float_format="%.17g")

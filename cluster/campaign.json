@@ -29,7 +29,9 @@
   "anomaly_duration_s": 240,
   "grace_s": 10,
   "reps_per_day": 4,
-  "healthy_batteries_per_day": 170,
+  "planned_machines": 2,
+  "planned_days": 3,
+  "healthy_batteries_per_day": 250,
   "benchmark_cmd": "UNKNOWN - fixed single-node benchmark (about 60 s healthy), chosen and pinned before the campaign",
   "benchmark_planned_s": 60
 }

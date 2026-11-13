@@ -267,3 +267,68 @@ def test_cli_dry_run(tmp_path):
     r = subprocess.run([sys.executable, str(KIT / "kit_harness.py"), "--config", str(KIT / "campaign.json"),
                         "--plan", str(plan), "--dry-run"], capture_output=True, text=True)  # fmt: skip
     assert r.returncode == 0 and "cpuoccupy" in r.stdout and "REFUSED here" in r.stdout
+
+
+# ------------------------------------------------------------------ D119(a): campaign size before the campaign
+
+
+@pytest.mark.parametrize(
+    "m, d, b, ok, fit, test",
+    [
+        (2, 3, 250, True, 1000, 500),
+        (2, 3, 170, False, 680, 340),  # the D114 plan: too few fit-day runs
+        (2, 3, 249, False, 996, 498),
+        (3, 3, 167, True, 1002, 501),
+        (4, 3, 125, True, 1000, 500),
+        (2, 6, 125, True, 1000, 500),
+        (4, 3, 74, False, 592, 296),
+    ],
+)
+def test_campaign_size(m, d, b, ok, fit, test):
+    assert KS.campaign_size(m, d, b) == {"fit_runs_per_probe": fit, "test_runs_per_probe": test}
+    cfg = {**CFG, "planned_machines": m, "planned_days": d, "healthy_batteries_per_day": b}
+    if ok:
+        assert KS.check_campaign_size(cfg)["fit_runs_per_probe"] == fit
+    else:
+        with pytest.raises(KS.Refused):
+            KS.check_campaign_size(cfg)
+
+
+@pytest.mark.parametrize("m, d", [(1, 3), (2, 2)])
+def test_campaign_needs_two_machines_and_three_days(m, d):
+    cfg = {**CFG, "planned_machines": m, "planned_days": d, "healthy_batteries_per_day": 10_000}
+    with pytest.raises(KS.Refused):
+        KS.check_campaign_size(cfg)
+
+
+@pytest.mark.parametrize(
+    "m, d, b", [(2, 3, 250), (3, 3, 167), (4, 3, 125), (2, 6, 125), (3, 6, 84), (4, 6, 63)]
+)
+def test_min_batteries_per_day(m, d, b):
+    assert KS.min_batteries_per_day(m, d) == b
+    assert KS.campaign_size(m, d, b)["fit_runs_per_probe"] >= 1000
+    assert (
+        KS.campaign_size(m, d, b - 1)["fit_runs_per_probe"] < 1000
+        or KS.campaign_size(m, d, b - 1)["test_runs_per_probe"] < 300
+    )
+
+
+def test_shipped_config_passes_the_size_check():
+    sz = KS.check_campaign_size(CFG)
+    assert sz["fit_runs_per_probe"] >= 1000 and sz["test_runs_per_probe"] >= 300
+
+
+def test_dry_run_prints_the_size_check(tmp_path):
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps(KC.healthy_plan(1, ["mem"], 1)))
+    r = subprocess.run([sys.executable, str(KIT / "kit_harness.py"), "--config", str(KIT / "campaign.json"),
+                        "--plan", str(plan), "--dry-run"], capture_output=True, text=True)  # fmt: skip
+    assert r.returncode == 0 and "campaign size" in r.stdout and "fit-day" in r.stdout
+
+
+def test_cli_refuses_an_undersized_campaign_before_anything(tmp_path, monkeypatch):
+    cfg = {**CFG, "healthy_batteries_per_day": 170}
+    h = KH.Harness(cfg, str(tmp_path / "log.jsonl"), facts=LINUX, approved={"node7"})
+    with pytest.raises(KS.Refused):
+        h.preflight()
+    assert not (tmp_path / "log.jsonl").exists()

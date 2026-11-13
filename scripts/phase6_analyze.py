@@ -31,7 +31,7 @@ def analyse(cfg: dict, logs: list[str], out: Path) -> dict:
     tel = AN.telemetry(df, ft, cfg["antarex"]["rf"], int(cfg["seed"]))  # D117
     g = AN.gate6(df, ft, ho, (min(s_all), max(s_all)), tel=tel)
     pool = out / "healthy_pool.csv"
-    AN.write_pool(ft, pool)
+    AN.write_measured(df, ft, pool)  # D119: fit rows = pool, test rows = outcome draws
     d = AN.d113_inputs(ft, m, kept, str(pool), tel)
     (out / "d113_inputs.yaml").write_text(yaml.safe_dump(d, sort_keys=False))
     (out / "gate6.json").write_text(json.dumps(g, indent=1, default=str))
