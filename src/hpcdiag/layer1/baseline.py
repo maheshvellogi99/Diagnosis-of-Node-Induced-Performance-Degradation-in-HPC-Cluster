@@ -32,22 +32,13 @@ class SplitResult:
     train_end_max: pd.Timestamp | None
     n_classes: dict
     unseen_test: dict
-    predictions: pd.DataFrame  # row_id, y, yhat, nodes_req
+    predictions: pd.DataFrame          # row_id, y, yhat, nodes_req
     config: dict | None
 
 
-def run_split(
-    df: pd.DataFrame,
-    index: TimeIndex,
-    t: pd.Timestamp,
-    train_days: float,
-    test_days: float,
-    numeric: list[str],
-    categorical: list[str],
-    target: str,
-    unseen: int = -1,
-    params: dict | None = None,
-) -> SplitResult | None:
+def run_split(df: pd.DataFrame, index: TimeIndex, t: pd.Timestamp, train_days: float,
+              test_days: float, numeric: list[str], categorical: list[str], target: str,
+              unseen: int = -1, params: dict | None = None) -> SplitResult | None:
     """Fit on train(t), predict test(t). Returns None if either side is empty."""
     tr_pos = index.train_positions(t, train_days)
     te_pos = index.test_positions(t, test_days)
@@ -62,18 +53,15 @@ def run_split(
     model = make_model(params)
     model.fit(xtr, train[target].to_numpy(dtype="float64"))
     yhat = model.predict(xte).astype("float64")
-    preds = pd.DataFrame(
-        {
-            "row_id": test["row_id"].to_numpy(),
-            "y": test[target].to_numpy(dtype="float64"),
-            "yhat": yhat,
-            "nodes_req": test["nodes_req"].to_numpy(dtype="float64"),
-        }
-    )
+    preds = pd.DataFrame({
+        "row_id": test["row_id"].to_numpy(),
+        "y": test[target].to_numpy(dtype="float64"),
+        "yhat": yhat,
+        "nodes_req": test["nodes_req"].to_numpy(dtype="float64"),
+    })
     unseen_test = {c: int((xte[c] == unseen).sum()) for c in categorical}
-    return SplitResult(
-        t, len(tr_pos), len(te_pos), end_max, n_classes, unseen_test, preds, booster_config(model)
-    )
+    return SplitResult(t, len(tr_pos), len(te_pos), end_max, n_classes, unseen_test, preds,
+                       booster_config(model))
 
 
 def base_score(cfg: dict) -> float:
@@ -92,8 +80,5 @@ def config_fingerprint(cfg: dict) -> str:
 
 
 def summarise_predictions(y: np.ndarray, yhat: np.ndarray) -> dict:
-    return {
-        "n_pred_lt_1s": int((yhat < 1).sum()),
-        "n_pred_lt_0": int((yhat < 0).sum()),
-        "n": int(len(y)),
-    }
+    return {"n_pred_lt_1s": int((yhat < 1).sum()), "n_pred_lt_0": int((yhat < 0).sum()),
+            "n": int(len(y))}

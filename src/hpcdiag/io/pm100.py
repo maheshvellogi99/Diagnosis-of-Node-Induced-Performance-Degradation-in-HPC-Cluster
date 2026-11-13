@@ -26,21 +26,9 @@ from hpcdiag.io.contract import (
 )
 
 RAW_COLUMNS = [
-    "job_id",
-    "user_id",
-    "partition",
-    "qos",
-    "submit_time",
-    "start_time",
-    "end_time",
-    "run_time",
-    "time_limit",
-    "num_nodes_req",
-    "num_cores_req",
-    "num_gpus_req",
-    "mem_req",
-    "job_state",
-    "nodes",
+    "job_id", "user_id", "partition", "qos", "submit_time", "start_time", "end_time",
+    "run_time", "time_limit", "num_nodes_req", "num_cores_req", "num_gpus_req", "mem_req",
+    "job_state", "nodes",
 ]
 
 INFINITE = "INFINITE"
@@ -117,9 +105,8 @@ def job_nodes(raw: pd.DataFrame) -> pd.DataFrame:
         {
             "row_id": raw_row_ids(raw)[rep],
             "job_id": raw["job_id"].to_numpy()[rep].astype("int64"),
-            "node_id": np.fromiter(
-                (x for lst in nodes for x in lst), dtype="int64", count=int(n.sum())
-            ),
+            "node_id": np.fromiter((x for lst in nodes for x in lst), dtype="int64",
+                                   count=int(n.sum())),
             "n_nodes": n.to_numpy()[rep],
             "start_time": to_utc_naive(raw["start_time"]).to_numpy()[rep],
             "end_time": to_utc_naive(raw["end_time"]).to_numpy()[rep],

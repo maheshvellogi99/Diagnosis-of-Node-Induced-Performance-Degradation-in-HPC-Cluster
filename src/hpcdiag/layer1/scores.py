@@ -34,20 +34,12 @@ class ModeAResult:
     p: np.ndarray
     group_key: np.ndarray
     n_cal: np.ndarray
-    upper_offset: np.ndarray  # CQR offset at alpha_bound for the chosen group
+    upper_offset: np.ndarray        # CQR offset at alpha_bound for the chosen group
 
 
-def mode_a_pvalues(
-    cal_score: np.ndarray,
-    cal_user: np.ndarray,
-    cal_part: np.ndarray,
-    test_score: np.ndarray,
-    test_user: np.ndarray,
-    test_part: np.ndarray,
-    n_min: int,
-    theta: np.ndarray,
-    alpha_bound: float = 0.1,
-) -> ModeAResult:
+def mode_a_pvalues(cal_score: np.ndarray, cal_user: np.ndarray, cal_part: np.ndarray,
+                   test_score: np.ndarray, test_user: np.ndarray, test_part: np.ndarray,
+                   n_min: int, theta: np.ndarray, alpha_bound: float = 0.1) -> ModeAResult:
     """Smoothed split-conformal p-values (D23); calibration group = test job's user if it has
     >= n_min calibration jobs, else its partition if >= n_min, else all calibration jobs."""
     cal = pd.DataFrame({"s": cal_score, "u": cal_user, "p": cal_part})
@@ -83,9 +75,8 @@ class ModeEResult:
     n_user: np.ndarray
 
 
-def mode_e_pvalues(
-    score: np.ndarray, user: np.ndarray, part: np.ndarray, theta: np.ndarray, n_min: int
-) -> ModeEResult:
+def mode_e_pvalues(score: np.ndarray, user: np.ndarray, part: np.ndarray, theta: np.ndarray,
+                   n_min: int) -> ModeEResult:
     """Smoothed online p-values; inputs must already be in (end_time, row_id) order.
 
     Every job updates its user, partition and global stream. Fallback (D19 default): report the

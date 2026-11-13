@@ -26,28 +26,18 @@ def fa_by_alpha(p: np.ndarray, alphas: list[float]) -> dict[str, float]:
 def fa_by_bin(p, y, alpha: float, edges_h, labels) -> list[dict]:
     p, y = np.asarray(p, float), np.asarray(y, float)
     b = bin_labels_for(y, edges_h, labels)
-    return [
-        {
-            "bin": lab,
-            "n": int((b == lab).sum()),
-            "fa": float(np.mean(p[b == lab] <= alpha)) if (b == lab).any() else float("nan"),
-        }
-        for lab in labels
-    ]
+    return [{"bin": lab, "n": int((b == lab).sum()),
+             "fa": float(np.mean(p[b == lab] <= alpha)) if (b == lab).any() else float("nan")}
+            for lab in labels]
 
 
 def rate_by_bin(alarm, y, edges_h, labels) -> list[dict]:
     """Alarm rate per actual-runtime bin for a boolean alarm column."""
     alarm, y = np.asarray(alarm, bool), np.asarray(y, float)
     b = bin_labels_for(y, edges_h, labels)
-    return [
-        {
-            "bin": lab,
-            "n": int((b == lab).sum()),
-            "fa": float(alarm[b == lab].mean()) if (b == lab).any() else float("nan"),
-        }
-        for lab in labels
-    ]
+    return [{"bin": lab, "n": int((b == lab).sum()),
+             "fa": float(alarm[b == lab].mean()) if (b == lab).any() else float("nan")}
+            for lab in labels]
 
 
 def fa_by_resource_decile(p, nodes_req, walltime_s, alpha: float) -> dict:
@@ -56,33 +46,24 @@ def fa_by_resource_decile(p, nodes_req, walltime_s, alpha: float) -> dict:
     p = np.asarray(p, float)
     thr = float(np.quantile(key, 0.9))
     top = key >= thr
-    return {
-        "threshold_node_seconds": thr,
-        "n_top": int(top.sum()),
-        "n_rest": int((~top).sum()),
-        "fa_top": float(np.mean(p[top] <= alpha)) if top.any() else float("nan"),
-        "fa_rest": float(np.mean(p[~top] <= alpha)) if (~top).any() else float("nan"),
-    }
+    return {"threshold_node_seconds": thr, "n_top": int(top.sum()), "n_rest": int((~top).sum()),
+            "fa_top": float(np.mean(p[top] <= alpha)) if top.any() else float("nan"),
+            "fa_rest": float(np.mean(p[~top] <= alpha)) if (~top).any() else float("nan")}
 
 
 def timeout_share(alarm: np.ndarray, state_raw: np.ndarray) -> dict:
     alarm = np.asarray(alarm, bool)
     to = np.asarray(state_raw) == "TIMEOUT"
-    return {
-        "n_alarms": int(alarm.sum()),
-        "rate": float(alarm.mean()) if len(alarm) else np.nan,
-        "timeout_share_of_alarms": float(to[alarm].mean()) if alarm.any() else float("nan"),
-    }
+    return {"n_alarms": int(alarm.sum()), "rate": float(alarm.mean()) if len(alarm) else np.nan,
+            "timeout_share_of_alarms": float(to[alarm].mean()) if alarm.any() else float("nan")}
 
 
 def ks_top_users(p, users, k: int) -> list[dict]:
     s = pd.Series(np.asarray(p, float))
     u = pd.Series(np.asarray(users, dtype=object))
     top = u.value_counts().head(k)
-    return [
-        {"user": str(name), "n": int(n), "ks": ks_distance(s[u == name].to_numpy())}
-        for name, n in top.items()
-    ]
+    return [{"user": str(name), "n": int(n), "ks": ks_distance(s[u == name].to_numpy())}
+            for name, n in top.items()]
 
 
 def evaluate(df: pd.DataFrame, pcol: str, cfg: dict, alarm_cols: list[str]) -> dict:
@@ -99,44 +80,26 @@ def evaluate(df: pd.DataFrame, pcol: str, cfg: dict, alarm_cols: list[str]) -> d
         "fa_by_bin_alpha_job": fa_by_bin(p, y, a["alpha_job"], ev["bins_hours"], ev["bin_labels"]),
         "fa_by_resource_decile_alpha_job": {
             "key": ev["resource_key"],
-            **fa_by_resource_decile(p, df["nodes_req"], df["walltime_req_s"], a["alpha_job"]),
-        },
+            **fa_by_resource_decile(p, df["nodes_req"], df["walltime_req_s"], a["alpha_job"])},
         "ks_top_users": ks_top_users(p, df["user"], ev["top_users_ks"]),
-        "alarms": {
-            c: timeout_share(df[c].to_numpy(), df["state_raw"].to_numpy()) for c in alarm_cols
-        },
-        "alarms_by_bin": {
-            c: rate_by_bin(df[c].to_numpy(), y, ev["bins_hours"], ev["bin_labels"])
-            for c in alarm_cols
-        },
+        "alarms": {c: timeout_share(df[c].to_numpy(), df["state_raw"].to_numpy())
+                   for c in alarm_cols},
+        "alarms_by_bin": {c: rate_by_bin(df[c].to_numpy(), y, ev["bins_hours"], ev["bin_labels"])
+                          for c in alarm_cols},
     }
-    for col, label in (
-        ("dec_qhat", "q_hat (model prediction)"),
-        ("dec_wall", "walltime_req_s (known at submit)"),
-    ):
+    for col, label in (("dec_qhat", "q_hat (model prediction)"),
+                       ("dec_wall", "walltime_req_s (known at submit)")):
         if col in df:
             d = df[col].to_numpy()
             out[f"fa_by_{col}_alpha_job"] = {
                 "key": f"decile of {label}; edges from the model's training rows",
-                "rows": [
-                    {
-                        "decile": k + 1,
-                        "n": int((d == k).sum()),
-                        "fa": float(np.mean(p[d == k] <= a["alpha_job"]))
-                        if (d == k).any()
-                        else float("nan"),
-                    }
-                    for k in range(10)
-                ],
-            }
+                "rows": [{"decile": k + 1, "n": int((d == k).sum()),
+                          "fa": float(np.mean(p[d == k] <= a["alpha_job"])) if (d == k).any()
+                          else float("nan")} for k in range(10)]}
     if "q50_log" in df:
         out["tare_median_model"] = tare_metrics(
-            y,
-            np.exp(df["q50_log"].to_numpy()),
-            df["nodes_req"].to_numpy(),
-            ev["tare_min_run_time_s_exclusive"],
-            ev["tare_clip_pred_min_s"],
-        )
+            y, np.exp(df["q50_log"].to_numpy()), df["nodes_req"].to_numpy(),
+            ev["tare_min_run_time_s_exclusive"], ev["tare_clip_pred_min_s"])
     if "ub_log" in df:
         ub = df["ub_log"].to_numpy()
         fin = np.isfinite(ub)
@@ -152,8 +115,7 @@ def evaluate(df: pd.DataFrame, pcol: str, cfg: dict, alarm_cols: list[str]) -> d
         out["group_level_share"] = {
             "user": float(gk.str.startswith("user:").mean()),
             "partition": float(gk.str.startswith("partition:").mean()),
-            "global": float((gk == "global").mean()),
-        }
+            "global": float((gk == "global").mean())}
     return out
 
 
@@ -161,13 +123,8 @@ def gate2_mode_e(m: dict, cfg: dict) -> dict:
     g = cfg["gate2"]
     fa_ok = {k: bool(abs(v - float(k)) <= g["fa_tol"]) for k, v in m["fa"].items()}
     ks_ok = bool(m["ks"] <= g["ks_max"])
-    return {
-        "ks": m["ks"],
-        "ks_ok": ks_ok,
-        "fa": m["fa"],
-        "fa_ok": fa_ok,
-        "pass": bool(ks_ok and all(fa_ok.values())),
-    }
+    return {"ks": m["ks"], "ks_ok": ks_ok, "fa": m["fa"], "fa_ok": fa_ok,
+            "pass": bool(ks_ok and all(fa_ok.values()))}
 
 
 def gate2_aci(rate: float, cfg: dict) -> dict:
@@ -188,14 +145,10 @@ def ks_location(p: np.ndarray) -> dict:
     x = np.sort(np.asarray(p, float)[np.isfinite(p)])
     n = len(x)
     i = np.arange(1, n + 1)
-    d_plus = i / n - x  # F_n just after x_i minus x_i
-    d_minus = x - (i - 1) / n  # x_i minus F_n just before x_i
+    d_plus = i / n - x            # F_n just after x_i minus x_i
+    d_minus = x - (i - 1) / n     # x_i minus F_n just before x_i
     jp, jm = int(np.argmax(d_plus)), int(np.argmax(d_minus))
     if d_plus[jp] >= d_minus[jm]:
-        return {
-            "ks": float(d_plus[jp]),
-            "p_at_max": float(x[jp]),
-            "sign": "+",
-            "F_n": float((jp + 1) / n),
-        }
+        return {"ks": float(d_plus[jp]), "p_at_max": float(x[jp]), "sign": "+",
+                "F_n": float((jp + 1) / n)}
     return {"ks": float(d_minus[jm]), "p_at_max": float(x[jm]), "sign": "-", "F_n": float(jm / n)}

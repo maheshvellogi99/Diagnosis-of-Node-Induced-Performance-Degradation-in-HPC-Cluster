@@ -14,9 +14,8 @@ import numpy as np
 import pandas as pd
 
 
-def split_times(
-    submit_time: pd.Series, offset_days: float, every_days: float, test_days: float
-) -> list[pd.Timestamp]:
+def split_times(submit_time: pd.Series, offset_days: float, every_days: float,
+                test_days: float) -> list[pd.Timestamp]:
     """All split times for a dataset (addendum C)."""
     start, end = submit_time.min(), submit_time.max()
     t = start + pd.Timedelta(days=offset_days)
@@ -71,9 +70,8 @@ class TimeIndex:
         return np.sort(self.submit_order[a:b])
 
 
-def mode_a_windows(
-    index: TimeIndex, t: pd.Timestamp, train_days: float, cal_days: float, test_days: float
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def mode_a_windows(index: TimeIndex, t: pd.Timestamp, train_days: float, cal_days: float,
+                   test_days: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Mode A (PLAN 2.3, addendum B): train end_time in [t - cal - train, t - cal),
     calibration end_time in [t - cal, t), test submit_time in [t, t + test).
     Train and calibration are disjoint by construction."""

@@ -40,9 +40,8 @@ def build_dup_table(raw_path: Path, out_path: Path) -> int:
     return len(ids)
 
 
-def load_jobs(
-    jobs_path: str | Path, features: list[str], states: list[str], require_walltime: bool
-) -> pd.DataFrame:
+def load_jobs(jobs_path: str | Path, features: list[str], states: list[str],
+              require_walltime: bool) -> pd.DataFrame:
     """Contract jobs with only the needed columns, filtered by state and walltime."""
     cols = list(dict.fromkeys(BASE_COLUMNS + features + ["walltime_req_s", "nodes_req"]))
     df = pd.read_parquet(jobs_path, columns=cols)

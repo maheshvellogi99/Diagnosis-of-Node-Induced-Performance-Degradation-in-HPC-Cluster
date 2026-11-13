@@ -45,21 +45,9 @@ JOB_NODES_SCHEMA = pa.schema(
 )
 
 # Columns that must never be null (everything else may be null; D8).
-JOBS_NOT_NULL = [
-    "row_id",
-    "job_id",
-    "system",
-    "user",
-    "partition",
-    "qos",
-    "submit_time",
-    "nodes_req",
-    "procs_req",
-    "gpus_req",
-    "state",
-    "state_raw",
-    "censored",
-]
+JOBS_NOT_NULL = ["row_id", "job_id", "system", "user", "partition", "qos", "submit_time",
+                 "nodes_req", "procs_req", "gpus_req", "state", "state_raw",
+                 "censored"]
 
 KEPT_STATES = ("COMPLETED", "TIMEOUT")
 

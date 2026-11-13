@@ -217,9 +217,8 @@ def test_processed_jobs_schema(system):
 def test_processed_jobs_values(system):
     path = PROCESSED[system]
     _need(path)
-    t = pq.read_table(
-        path, columns=["run_time_s", "state", "state_raw", "censored", "system", "job_id"]
-    )
+    t = pq.read_table(path, columns=["run_time_s", "state", "state_raw", "censored", "system",
+                                     "job_id"])
     rt = t["run_time_s"].to_numpy(zero_copy_only=False)
     assert not (rt < 0).any(), "negative run times"
     assert set(t["system"].unique().to_pylist()) == {system}
@@ -231,15 +230,11 @@ def test_processed_jobs_values(system):
 @realdata
 def test_processed_rows_equal_raw_rows():
     """Lossless loaders (D8): processed row count equals raw row count."""
-    for system, raw in (
-        ("eagle", "data/raw/eagle/eagle_data.parquet"),
-        ("pm100", "data/raw/pm100/job_table.parquet"),
-    ):
+    for system, raw in (("eagle", "data/raw/eagle/eagle_data.parquet"),
+                        ("pm100", "data/raw/pm100/job_table.parquet")):
         _need(PROCESSED[system])
-        assert (
-            pq.ParquetFile(PROCESSED[system]).metadata.num_rows
-            == pq.ParquetFile(resolve(raw)).metadata.num_rows
-        )
+        assert (pq.ParquetFile(PROCESSED[system]).metadata.num_rows
+                == pq.ParquetFile(resolve(raw)).metadata.num_rows)
 
 
 @realdata

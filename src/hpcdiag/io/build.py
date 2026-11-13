@@ -1,6 +1,6 @@
 """Build the processed contract tables from raw data (PLAN.md §9 Phase 0, tasks 4 and 6).
 
-uv run python -m hpcdiag.io.build --config configs/phase0_data.yaml
+    uv run python -m hpcdiag.io.build --config configs/phase0_data.yaml
 """
 
 from __future__ import annotations

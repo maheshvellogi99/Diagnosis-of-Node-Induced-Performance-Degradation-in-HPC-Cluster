@@ -23,9 +23,8 @@ def write_scenario(out_dir: Path, changes: pd.DataFrame, truth: pd.DataFrame, me
     (out_dir / "scenario.json").write_text(json.dumps(meta, indent=2, default=str))
 
 
-def materialize(
-    base_jobs: pd.DataFrame, changes: pd.DataFrame, validate: bool = True
-) -> pd.DataFrame:
+def materialize(base_jobs: pd.DataFrame, changes: pd.DataFrame,
+                validate: bool = True) -> pd.DataFrame:
     """Full jobs table = base with the changed rows replaced. Base must be in row_id order
     (row_id = position, D10). Unchanged rows are copied untouched."""
     if not np.array_equal(base_jobs["row_id"].to_numpy(), np.arange(len(base_jobs))):
@@ -41,9 +40,8 @@ def materialize(
     return out
 
 
-def load_scenario(
-    scen_dir: Path, base_jobs: pd.DataFrame
-) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+def load_scenario(scen_dir: Path,
+                  base_jobs: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """(materialized jobs, truth, meta). The node table to use is meta['job_nodes']."""
     meta = json.loads((scen_dir / "scenario.json").read_text())
     changes = pd.read_parquet(scen_dir / "changes.parquet")

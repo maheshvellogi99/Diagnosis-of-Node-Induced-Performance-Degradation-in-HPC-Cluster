@@ -29,7 +29,7 @@ def test_mode_a_windows_disjoint_and_ordered(t_days):
     t = T0 + pd.Timedelta(days=t_days)
     tr, cal, te = mode_a_windows(idx, t, 100, 14, 1)
     assert len(tr) and len(cal) and len(te)
-    assert not set(tr) & set(cal)  # no overlap (addendum B)
+    assert not set(tr) & set(cal)                                    # no overlap (addendum B)
     e, s = df["end_time"], df["submit_time"]
     assert (e.iloc[tr] >= t - pd.Timedelta(days=114)).all()
     assert (e.iloc[tr] < t - pd.Timedelta(days=14)).all()

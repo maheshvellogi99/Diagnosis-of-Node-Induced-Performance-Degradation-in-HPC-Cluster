@@ -16,7 +16,7 @@ EDGES = [0, 1, 6, 24, 48]
 
 def test_rmse_mae_signed_hours():
     y, yhat = np.array([3600.0, 7200.0]), np.array([0.0, 7200.0])
-    assert M.rmse_h(y, yhat) == pytest.approx(1 / math.sqrt(2))  # sqrt(3600^2/2)/3600
+    assert M.rmse_h(y, yhat) == pytest.approx(1 / math.sqrt(2))   # sqrt(3600^2/2)/3600
     assert M.mae_h(y, yhat) == pytest.approx(0.5)
     assert M.mean_signed_error_h(y, yhat) == pytest.approx(-0.5)
 
@@ -24,7 +24,7 @@ def test_rmse_mae_signed_hours():
 def test_a_geo_unweighted_and_weighted():
     assert M.a_geo([100, 200], [50, 400], [1, 1]) == pytest.approx(0.5)
     # a = [1, 0.5], c = [3*100, 1*100] -> 0.5 ** (100/400)
-    assert M.a_geo([100, 100], [100, 50], [3, 1]) == pytest.approx(0.5**0.25)
+    assert M.a_geo([100, 100], [100, 50], [3, 1]) == pytest.approx(0.5 ** 0.25)
     assert M.a_geo([10, 20], [10, 20], [1, 5]) == pytest.approx(1.0)
     with pytest.raises(ValueError):
         M.a_geo([10], [0], [1])
@@ -59,7 +59,7 @@ def test_per_bin_table_hand_example():
     y = np.array([10.0, 1800.0, 2 * h, 50 * h, 60 * h])
     yhat = np.array([20.0, 900.0, 4 * h, 25 * h, 30 * h])
     t = M.per_bin_table(y, yhat, EDGES, LABELS, 30).set_index("bin")
-    assert t.loc["0-1h", "n"] == 2 and t.loc["0-1h", "n_r"] == 1  # y=10 s excluded from r
+    assert t.loc["0-1h", "n"] == 2 and t.loc["0-1h", "n_r"] == 1     # y=10 s excluded from r
     assert t.loc["0-1h", "median_r"] == pytest.approx(math.log(0.5))
     assert t.loc["1-6h", "median_r"] == pytest.approx(math.log(2))
     assert t.loc[">2d", "median_r"] == pytest.approx(math.log(0.5))

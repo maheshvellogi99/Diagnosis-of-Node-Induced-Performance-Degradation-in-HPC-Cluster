@@ -20,9 +20,8 @@ def mixture_calibrator(p: np.ndarray, kappas=KAPPAS) -> np.ndarray:
     return np.mean([power_calibrator(p, k) for k in kappas], axis=0)
 
 
-def null_mean_f(
-    n: int, n_sims: int, seed: int, kappas=KAPPAS, chunk: int = 1_000_000
-) -> np.ndarray:
+def null_mean_f(n: int, n_sims: int, seed: int, kappas=KAPPAS,
+                chunk: int = 1_000_000) -> np.ndarray:
     """Sample means of the mixture calibrator over n IID U(0,1) p-values, n_sims times."""
     rng = np.random.default_rng(seed)
     out = np.empty(n_sims)
@@ -36,9 +35,8 @@ def null_mean_f(
     return out
 
 
-def tail_checks(
-    p: np.ndarray, n_sims: int, seed: int, thresholds=(1e-3, 1e-4), kappas=KAPPAS
-) -> dict:
+def tail_checks(p: np.ndarray, n_sims: int, seed: int, thresholds=(1e-3, 1e-4),
+                kappas=KAPPAS) -> dict:
     """D24: P(p <= t) for small t, and mean mixture f(p) against its simulated null."""
     p = np.asarray(p, dtype="float64")
     p = p[np.isfinite(p)]
@@ -48,13 +46,9 @@ def tail_checks(
         "n": int(len(p)),
         "p_le": {f"{t:g}": float(np.mean(p <= t)) for t in thresholds},
         "mean_f": mf,
-        "null_mean_f": {
-            "p50": float(np.percentile(null, 50)),
-            "p95": float(np.percentile(null, 95)),
-            "p99": float(np.percentile(null, 99)),
-            "n_sims": n_sims,
-            "seed": seed,
-        },
+        "null_mean_f": {"p50": float(np.percentile(null, 50)),
+                        "p95": float(np.percentile(null, 95)),
+                        "p99": float(np.percentile(null, 99)), "n_sims": n_sims, "seed": seed},
         "mean_f_le_null_p95": bool(mf <= np.percentile(null, 95)),
         "kappas": list(kappas),
     }

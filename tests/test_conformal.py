@@ -40,7 +40,7 @@ def test_smoothed_uniform_on_iid_continuous(seed):
 @pytest.mark.parametrize("seed", SEEDS)
 def test_smoothed_uniform_with_heavy_ties(seed):
     rng = np.random.default_rng(seed)
-    scores = rng.integers(0, 4, 10_000).astype(float)  # only 4 distinct values
+    scores = rng.integers(0, 4, 10_000).astype(float)   # only 4 distinct values
     p = smoothed_online_pvalues(scores, rng.uniform(size=10_000))
     assert stats.kstest(p, "uniform").pvalue > 0.01
 
@@ -59,7 +59,7 @@ def test_streams_are_independent():
     st = OnlineStreams()
     assert st.update("u1", 1.0, 0.5) == (0.5, 1)
     assert st.update("u2", 9.0, 0.5) == (0.5, 1)
-    p, n = st.update("u1", 0.0, 0.5)  # 1 greater, 1 equal (itself)
+    p, n = st.update("u1", 0.0, 0.5)          # 1 greater, 1 equal (itself)
     assert n == 2 and p == pytest.approx((1 + 0.5) / 2)
     assert st.count("u1") == 2 and st.count("u2") == 1 and st.count("x") == 0
     with pytest.raises(ValueError):
@@ -85,7 +85,7 @@ def test_split_pvalues_super_uniform():
 
 
 def test_conformal_upper_offset():
-    cal = np.arange(1.0, 10.0)  # n = 9
+    cal = np.arange(1.0, 10.0)                     # n = 9
     assert conformal_upper_offset(cal, 0.1) == 9.0  # k = ceil(0.9 * 10) = 9
     assert conformal_upper_offset(cal, 0.2) == 8.0  # k = ceil(0.8 * 10) = 8
     assert conformal_upper_offset(cal, 0.05) == float("inf")
@@ -114,11 +114,10 @@ def test_smoothed_split_hand():
 def test_smoothed_split_uniform_with_heavy_ties(seed):
     rng = np.random.default_rng(seed)
     n_cal, trials = 40, 10_000
-    s = rng.integers(0, 3, (trials, n_cal + 1)).astype(float)  # 3 distinct values
+    s = rng.integers(0, 3, (trials, n_cal + 1)).astype(float)   # 3 distinct values
     th = rng.uniform(size=trials)
-    p = np.array(
-        [smoothed_split_pvalues(r[:-1], r[-1:], th[i : i + 1])[0] for i, r in enumerate(s)]
-    )
+    p = np.array([smoothed_split_pvalues(r[:-1], r[-1:], th[i:i + 1])[0]
+                  for i, r in enumerate(s)])
     assert stats.kstest(p, "uniform").pvalue > 0.01
     # the unsmoothed version is far from uniform on the same draws (the reason for D23)
     q = np.array([split_pvalues(r[:-1], r[-1:])[0] for r in s])
@@ -142,7 +141,7 @@ def _brute_sliding(s, e, th, w, min_ref, keys=None):
 
 def _stream(n, seed, ties=False):
     rng = np.random.default_rng(seed)
-    e = np.sort(rng.integers(0, 50_000, n))  # many equal end times
+    e = np.sort(rng.integers(0, 50_000, n))           # many equal end times
     s = rng.integers(0, 5, n).astype(float) if ties else rng.standard_normal(n)
     return s, e, rng.uniform(size=n)
 
@@ -161,10 +160,10 @@ def test_sliding_reference_excludes_later_and_tied_larger_rowid():
     """R_j never contains a job that ends after j, nor a job with the same end time that comes
     later in D14 order (larger row_id): changing such jobs leaves p_j unchanged."""
     s, e, th = _stream(600, 5)
-    e[300:310] = e[300]  # a block of equal end times
+    e[300:310] = e[300]                              # a block of equal end times
     p, _ = sliding_window_pvalues(s, e, th, 10**9, 30)
     s2 = s.copy()
-    s2[305:] = 1e6  # later-or-tied-larger-row_id jobs change
+    s2[305:] = 1e6                                   # later-or-tied-larger-row_id jobs change
     p2, _ = sliding_window_pvalues(s2, e, th, 10**9, 30)
     np.testing.assert_array_equal(p[:305], p2[:305])
 
@@ -204,4 +203,4 @@ def test_sliding_query_scores_shift_matches_brute_force():
             exp[j] = (np.sum(r > q[j]) + th[j] * (1 + np.sum(r == q[j]))) / (len(r) + 1)
     np.testing.assert_allclose(p, exp, equal_nan=True)
     p0, _ = sliding_window_pvalues(s, e, th, 3000, 30)
-    assert np.nanmedian(p) < np.nanmedian(p0)  # a positive shift lowers p-values
+    assert np.nanmedian(p) < np.nanmedian(p0)            # a positive shift lowers p-values

@@ -9,9 +9,8 @@ from __future__ import annotations
 import numpy as np
 
 
-def aci_alarms(
-    p: np.ndarray, groups: np.ndarray, alpha: float, gamma: float
-) -> tuple[np.ndarray, np.ndarray]:
+def aci_alarms(p: np.ndarray, groups: np.ndarray, alpha: float,
+               gamma: float) -> tuple[np.ndarray, np.ndarray]:
     """Return (alarm bool array, alpha_t used for each job). `groups` keys the ACI state."""
     p = np.asarray(p, dtype="float64")
     groups = np.asarray(groups, dtype=object)
