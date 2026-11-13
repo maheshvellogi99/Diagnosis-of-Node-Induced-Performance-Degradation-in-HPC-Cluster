@@ -1,0 +1,35 @@
+{
+  "_comment": "Phase 6 measurement kit settings (D114, D115). Values marked [D] are protocol design choices fixed before any measurement; UNKNOWN values must be filled on the target machine, from the pinned HPAS README and a calibration run, and committed BEFORE the healthy campaign. The harness refuses to run anything that still contains UNKNOWN.",
+  "probes": ["cpu", "mbw", "cache", "mem", "tel"],
+  "bin_dir": "cluster/bin",
+  "hpas_dir": "cluster/third_party/HPAS",
+  "probe_params": {
+    "_comment": "Work sizes are calibrated once on the target so that a healthy run takes about the planned cost (configs/phase5.yaml probes.cost_s), then frozen.",
+    "cpu_work_iterations": "UNKNOWN - calibrate: healthy run about 20 s",
+    "pchase_bytes": "UNKNOWN - calibrate: well above the last-level cache size of the target CPU",
+    "pchase_steps": "UNKNOWN - calibrate: healthy run about 20 s",
+    "tel_seconds": 60
+  },
+  "anomaly_names": ["cpuoccupy", "cachecopy", "membw", "memleak"],
+  "intensities": ["low", "high"],
+  "anomalies": {
+    "cpuoccupy": {"template": "UNKNOWN - command from the HPAS README at the pinned commit, with {hpas_dir}, {duration_s} and {intensity_arg}",
+                  "intensity_args": {"low": "UNKNOWN", "high": "UNKNOWN"}},
+    "cachecopy": {"template": "UNKNOWN - command from the HPAS README at the pinned commit, with {hpas_dir}, {duration_s} and {intensity_arg}",
+                  "intensity_args": {"low": "UNKNOWN", "high": "UNKNOWN"}},
+    "membw":     {"template": "UNKNOWN - command from the HPAS README at the pinned commit, with {hpas_dir}, {duration_s} and {intensity_arg}",
+                  "intensity_args": {"low": "UNKNOWN", "high": "UNKNOWN"}},
+    "memleak":   {"template": "UNKNOWN - command from the HPAS README at the pinned commit, with {hpas_dir}, {duration_s}, {intensity_arg} and {bytes}",
+                  "intensity_args": {"low": "UNKNOWN", "high": "UNKNOWN"},
+                  "fractions": {"low": 0.05, "high": 0.15}}
+  },
+  "memleak_cap_fraction": 0.20,
+  "warmup_s": 30,
+  "cooldown_s": 60,
+  "anomaly_duration_s": 240,
+  "grace_s": 10,
+  "reps_per_day": 4,
+  "healthy_batteries_per_day": 170,
+  "benchmark_cmd": "UNKNOWN - fixed single-node benchmark (about 60 s healthy), chosen and pinned before the campaign",
+  "benchmark_planned_s": 60
+}

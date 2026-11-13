@@ -12,3 +12,7 @@ __pycache__/
 # Claude Code /export transcripts (local only)
 *-local-command-caveat*.txt
 hpc_claude_code_complete_conversation*.txt
+# Phase 6 kit: built binaries, third-party sources and campaign logs stay off git
+cluster/bin/
+cluster/third_party/
+cluster/logs/
