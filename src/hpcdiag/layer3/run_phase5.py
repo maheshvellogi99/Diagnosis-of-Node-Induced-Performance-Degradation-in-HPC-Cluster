@@ -54,6 +54,14 @@ BASELINES = ("P-all", "P-IG", "P-random", "P-randnode", "P-sweep")
 L: dict = {}  # per-process state
 
 
+def make_policy(base_policy: str, B: float, cfg: dict) -> SIM.Policy:
+    """The Policy the runner uses for a POLICIES entry; "config" values are read from cfg."""
+    kw = dict(POLICIES[base_policy])
+    if kw.get("probe_J") == "config":
+        kw["probe_J"] = float(cfg["evalue"]["probe_J"])
+    return SIM.Policy(f"{base_policy}_B{B}", float(B), **kw)
+
+
 def key(x: str) -> int:
     return zlib.crc32(x.encode())
 
@@ -158,10 +166,7 @@ def run_one(sid, meta, truth, snap, extra, variant, base_policy, B, k_pre=0) -> 
     lc = R.G["cfg"]["layer2"]
     eval_ns, m = R.G["eval_ns"], lc["m_fixed"]
     t0 = time.time()
-    kw = dict(POLICIES[base_policy])
-    if kw.get("probe_J") == "config":
-        kw["probe_J"] = float(cfg["evalue"]["probe_J"])
-    pol = SIM.Policy(f"{base_policy}_B{B}", float(B), **kw)
+    pol = make_policy(base_policy, B, cfg)
     cause, onset, truth_rows = world_arrays(meta, truth, snap.shape[1])
     s = float(meta["s"]) if meta["kind"] == "node" else 1.0
     bel = _belief(variant)
