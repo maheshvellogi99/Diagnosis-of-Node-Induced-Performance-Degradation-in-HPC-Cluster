@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import norm
 
-from hpcdiag.layer3.probes import CAUSES, ProbeModel, state_table
+from hpcdiag.layer3.probes import CAUSES, ProbeModel, sig, state_table
 
 
 def conformal_p(x: np.ndarray, pool: np.ndarray, theta: np.ndarray) -> np.ndarray:
@@ -93,6 +93,8 @@ class Bets:
 
 def build_bets(m: ProbeModel, ec: dict, rng: np.random.Generator) -> Bets:
     """D87. A probe with mean 0 under a cause has uniform p, so its density is 1 exactly."""
+    if np.ndim(m.sigma) > 0:
+        raise ValueError("per-probe sigma (D113) is supported for the D96 state bets only")
     edges = np.asarray(ec["edges"], float)
     n, n_pools = ec["n_pool"], ec["bet_pools"]
     pools = rng.normal(0, m.sigma, (n_pools, n))
@@ -107,33 +109,37 @@ def build_bets(m: ProbeModel, ec: dict, rng: np.random.Generator) -> Bets:
 
 def build_state_bets(m: ProbeModel, ec: dict, s_grid, rng: np.random.Generator) -> Bets:
     """D96: one density per probe and (cause, s0) state, in the order of state_table without h0,
-    each over the same independent pools and integrating to exactly 1. Zero shift: density 1."""
+    each over the same independent pools and integrating to exactly 1. Zero shift: density 1.
+    Per-probe sigma (D113): one standard-normal pool set, scaled by each probe's sigma."""
     edges = np.asarray(ec["edges"], float)
     n, n_pools = ec["n_pool"], ec["bet_pools"]
-    pools = rng.normal(0, m.sigma, (n_pools, n))
+    per = np.ndim(m.sigma) > 0
+    pools = rng.normal(0, 1.0 if per else m.sigma, (n_pools, n))
     all_means, hyp = state_table(m, s_grid)
     means = all_means[hyp > 0]
     G = np.ones((len(m.names), len(means), len(edges) - 1))
     P = np.empty((len(m.names), len(all_means), len(edges) - 1))
-    s = -np.sort(-pools, axis=1)
+    s_shared = None if per else -np.sort(-pools, axis=1)
     ov = bin_overlap(n, edges)
     z = np.zeros((n_pools, 1))
-    cache: dict[float, np.ndarray] = {}
+    cache: dict[tuple[float, float], np.ndarray] = {}
 
-    def mass(mu: float) -> np.ndarray:
-        if mu not in cache:
-            sf = norm.sf((s - mu) / m.sigma)
+    def mass(mu: float, sg: float, s: np.ndarray) -> np.ndarray:
+        if (mu, sg) not in cache:
+            sf = norm.sf((s - mu) / sg)
             pr = np.diff(np.concatenate([z, sf, z + 1.0], axis=1), axis=1)
             x = pr.mean(axis=0) @ ov
-            cache[mu] = x / x.sum()
-        return cache[mu]
+            cache[(mu, sg)] = x / x.sum()
+        return cache[(mu, sg)]
 
     for i in range(len(m.names)):
+        sg = sig(m.sigma, i)
+        s = s_shared if not per else -np.sort(-(pools * sg), axis=1)
         for j, mu in enumerate(means[:, i]):
             if mu != 0:
-                G[i, j] = mass(mu) / np.diff(edges)
+                G[i, j] = mass(mu, sg, s) / np.diff(edges)
         for j, mu in enumerate(all_means[:, i]):
-            P[i, j] = mass(float(mu))
+            P[i, j] = mass(float(mu), sg, s)
     return Bets(G, edges, float(ec["beta"]), per_state=True, P=P)
 
 

@@ -67,9 +67,9 @@ def _one_step_expectation(logC, w, J):
     from hpcdiag.stats.evalues import jumper_step, log_total
 
     def h(u):
-        p = u ** 20
+        p = u**20
         lg = np.concatenate([[0.0], log_bet(np.array([max(p, 1e-300)]), w)[0]])[None, :]
-        return np.exp(log_total(jumper_step(logC[None, :], lg, J))[0]) * 20 * u ** 19
+        return np.exp(log_total(jumper_step(logC[None, :], lg, J))[0]) * 20 * u**19
 
     return itg.quad(h, 0, 1, limit=400, epsabs=1e-12, epsrel=1e-10)[0]
 
@@ -152,8 +152,8 @@ def test_ebh_fdr_on_null_evalues():
     m, sims = 50, 4000
     fdp = []
     for _ in range(sims):
-        e = 0.5 * rng.uniform(size=m) ** (-0.5)    # kappa = 0.5 calibrator of U: E = 1
-        fdp.append(float(ebh(e, ALPHA).any()))      # all nulls: FDP = 1{any rejection}
+        e = 0.5 * rng.uniform(size=m) ** (-0.5)  # kappa = 0.5 calibrator of U: E = 1
+        fdp.append(float(ebh(e, ALPHA).any()))  # all nulls: FDP = 1{any rejection}
     assert np.mean(fdp) <= ALPHA + 3 * np.sqrt(ALPHA * (1 - ALPHA) / sims)
 
 

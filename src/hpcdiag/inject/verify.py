@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 
 
-def expected_multipliers(jobs: pd.DataFrame, job_nodes: pd.DataFrame, truth: pd.DataFrame,
-                         eligible_states: list[str]) -> dict[int, float]:
+def expected_multipliers(
+    jobs: pd.DataFrame, job_nodes: pd.DataFrame, truth: pd.DataFrame, eligible_states: list[str]
+) -> dict[int, float]:
     """{row_id: multiplier before censoring} implied by `truth` for the eligible jobs."""
     if truth.empty:
         return {}
@@ -44,8 +45,12 @@ def expected_multipliers(jobs: pd.DataFrame, job_nodes: pd.DataFrame, truth: pd.
     elif kind in ("user_decoy", "user_decoy_heavy"):
         u = truth["user"].iloc[0]
         t0 = np.datetime64(truth["onset_time"].iloc[0], "us")
-        for rid, usr, st in zip(j.index, j["user"].astype(str).tolist(),
-                                j["start_time"].to_numpy().astype("datetime64[us]"), strict=True):
+        for rid, usr, st in zip(
+            j.index,
+            j["user"].astype(str).tolist(),
+            j["start_time"].to_numpy().astype("datetime64[us]"),
+            strict=True,
+        ):
             if usr == u and st >= t0:
                 out[int(rid)] = s
     elif kind == "system_shock":
@@ -59,15 +64,22 @@ def expected_multipliers(jobs: pd.DataFrame, job_nodes: pd.DataFrame, truth: pd.
     return out
 
 
-def check_changes(jobs: pd.DataFrame, job_nodes: pd.DataFrame, truth: pd.DataFrame,
-                  changes: pd.DataFrame, eligible_states: list[str]) -> list[str]:
+def check_changes(
+    jobs: pd.DataFrame,
+    job_nodes: pd.DataFrame,
+    truth: pd.DataFrame,
+    changes: pd.DataFrame,
+    eligible_states: list[str],
+) -> list[str]:
     """Problems (empty list = exact match) between `changes` and what `truth` implies."""
     exp = expected_multipliers(jobs, job_nodes, truth, eligible_states)
     got = dict(zip(changes["row_id"].astype(int), changes["factor_applied"], strict=True))
     problems = []
     if set(exp) != set(got):
-        problems.append(f"affected sets differ: {len(set(exp) - set(got))} missing, "
-                        f"{len(set(got) - set(exp))} extra")
+        problems.append(
+            f"affected sets differ: {len(set(exp) - set(got))} missing, "
+            f"{len(set(got) - set(exp))} extra"
+        )
     common = sorted(set(exp) & set(got))
     if common:
         d = np.abs(np.array([exp[r] for r in common]) - np.array([got[r] for r in common]))

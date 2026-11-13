@@ -15,11 +15,17 @@ HYPOTHESES = ("h0", "cpu", "cache", "mbw", "mem")
 CAUSES = HYPOTHESES[1:]
 
 
+def sig(sigma, a: int):
+    """sigma of probe a: the scalar itself (unchanged object), or entry a of a per-probe sigma
+    (D113)."""
+    return sigma if np.ndim(sigma) == 0 else float(sigma[a])
+
+
 @dataclass(frozen=True)
 class ProbeModel:
     names: tuple[str, ...]
     cost: tuple[float, ...]
-    sigma: float
+    sigma: float | tuple[float, ...]  # one sigma, or one per probe in the order of names (D113)
     k: dict  # k[cause][probe]
     mem_shift: float
 
@@ -33,10 +39,18 @@ class ProbeModel:
 
 
 def from_config(pc: dict) -> ProbeModel:
+    s = pc["sigma"]
+    if isinstance(s, dict):  # D113: one sigma per probe
+        missing = [a for a in pc["names"] if a not in s]
+        if missing or set(s) - set(pc["names"]):
+            raise ValueError(f"probes.sigma per probe must name exactly {pc['names']}")
+        sigma = tuple(float(s[a]) for a in pc["names"])
+    else:
+        sigma = float(s)
     return ProbeModel(
         names=tuple(pc["names"]),
         cost=tuple(float(pc["cost_s"][a]) for a in pc["names"]),
-        sigma=float(pc["sigma"]),
+        sigma=sigma,
         k={c: dict(v) for c, v in pc["k"].items()},
         mem_shift=float(pc["mem_fixed_shift"]),
     )

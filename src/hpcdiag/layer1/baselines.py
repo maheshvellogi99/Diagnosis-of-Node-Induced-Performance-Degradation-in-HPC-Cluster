@@ -16,8 +16,9 @@ import numpy as np
 from hpcdiag.layer1.quantile import fit_l2, fit_quantile
 
 
-def guide_alarm(T: np.ndarray, T_hat: np.ndarray, threshold: float = 0.20,
-                clip_min: float = 1.0) -> np.ndarray:
+def guide_alarm(
+    T: np.ndarray, T_hat: np.ndarray, threshold: float = 0.20, clip_min: float = 1.0
+) -> np.ndarray:
     th = np.maximum(np.asarray(T_hat, float), clip_min)
     return (np.asarray(T, float) - th) / th > threshold
 
@@ -43,7 +44,7 @@ class UARPModel:
         y = np.asarray(y_seconds, float)
         q50 = fit_quantile(X, y, 0.50, params, seed)
         q99 = fit_quantile(X, y, 0.99, params, seed)
-        resid2 = (y - q50.predict(X)) ** 2          # residual model fitted on training rows
+        resid2 = (y - q50.predict(X)) ** 2  # residual model fitted on training rows
         var = fit_l2(X, resid2, params, seed)
         return cls(q50, q99, var)
 

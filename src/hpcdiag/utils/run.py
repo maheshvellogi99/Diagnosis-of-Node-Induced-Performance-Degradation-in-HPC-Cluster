@@ -44,7 +44,10 @@ def git_commit() -> str:
     """Current git commit hash, with a '-dirty' suffix if the tree has uncommitted changes."""
     try:
         sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, capture_output=True, text=True,
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
             check=True,
         ).stdout.strip()
         dirty = subprocess.run(
@@ -79,11 +82,30 @@ class Run:
         with open(registry, "a", newline="") as fh:
             w = csv.writer(fh)
             if new:
-                w.writerow(["run_id", "phase", "config_hash", "git_commit", "start", "end",
-                            "status", "key_metrics"])
-            w.writerow([self.run_id, self.phase, self.config_hash, self.commit, self.started,
-                        dt.datetime.now().isoformat(timespec="seconds"), status,
-                        json.dumps(key_metrics or {}, default=str)])
+                w.writerow(
+                    [
+                        "run_id",
+                        "phase",
+                        "config_hash",
+                        "git_commit",
+                        "start",
+                        "end",
+                        "status",
+                        "key_metrics",
+                    ]
+                )
+            w.writerow(
+                [
+                    self.run_id,
+                    self.phase,
+                    self.config_hash,
+                    self.commit,
+                    self.started,
+                    dt.datetime.now().isoformat(timespec="seconds"),
+                    status,
+                    json.dumps(key_metrics or {}, default=str),
+                ]
+            )
         self.log.info("run %s finished: %s", self.run_id, status)
 
 
@@ -112,10 +134,16 @@ def start_run(phase: str, config_path: str | Path, tag: str = "") -> Run:
         log.addHandler(h)
 
     set_seeds(int(config.get("seed", 0)))
-    log.info("run %s started; config %s (sha256[:12]=%s); commit %s",
-             run_id, config_path, config_hash, commit)
-    return Run(run_id, phase, run_dir, config, config_hash, commit,
-               now.isoformat(timespec="seconds"), log)
+    log.info(
+        "run %s started; config %s (sha256[:12]=%s); commit %s",
+        run_id,
+        config_path,
+        config_hash,
+        commit,
+    )
+    return Run(
+        run_id, phase, run_dir, config, config_hash, commit, now.isoformat(timespec="seconds"), log
+    )
 
 
 def run_guarded(run: Run, body: Callable[[Run], int]) -> int:

@@ -27,7 +27,7 @@ def random_placement(job_nodes: pd.DataFrame, jobs: pd.DataFrame, seed: int) -> 
         pool = pnodes[part[rid]]
         if k > len(pool):
             raise ValueError(f"job {rid} needs {k} nodes, partition has {len(pool)}")
-        new[pos:pos + k] = np.sort(rng.choice(pool, size=k, replace=False))
+        new[pos : pos + k] = np.sort(rng.choice(pool, size=k, replace=False))
         pos += k
     out = jn.copy()
     out["node_id"] = new

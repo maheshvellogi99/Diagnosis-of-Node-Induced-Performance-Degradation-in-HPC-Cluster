@@ -23,14 +23,21 @@ def _df(n=3000, seed=0):
     submit = t0 + pd.to_timedelta(rng.integers(0, 150 * 86400, n), unit="s")
     wall = rng.choice([600.0, 3600.0, 86400.0], n)
     rt = np.minimum(wall, rng.exponential(wall / 3))
-    return pd.DataFrame({
-        "row_id": np.arange(n), "submit_time": submit,
-        "end_time": submit + pd.to_timedelta(rt.astype(int) + 1, unit="s"),
-        "run_time_s": rt, "walltime_req_s": wall, "procs_req": rng.integers(1, 64, n),
-        "mem_req": rng.choice([0.0, 1000.0], n), "nodes_req": rng.integers(1, 4, n),
-        "gpus_req": rng.integers(0, 2, n), "user": rng.choice(list("abcdefg"), n),
-        "partition": rng.choice(["short", "std"], n),
-    })
+    return pd.DataFrame(
+        {
+            "row_id": np.arange(n),
+            "submit_time": submit,
+            "end_time": submit + pd.to_timedelta(rt.astype(int) + 1, unit="s"),
+            "run_time_s": rt,
+            "walltime_req_s": wall,
+            "procs_req": rng.integers(1, 64, n),
+            "mem_req": rng.choice([0.0, 1000.0], n),
+            "nodes_req": rng.integers(1, 4, n),
+            "gpus_req": rng.integers(0, 2, n),
+            "user": rng.choice(list("abcdefg"), n),
+            "partition": rng.choice(["short", "std"], n),
+        }
+    )
 
 
 def test_make_model_uses_xgboost_defaults():
@@ -56,10 +63,11 @@ def test_config_fingerprint_ignores_only_base_score():
     idx = TimeIndex.build(df["end_time"], df["submit_time"])
     a = run_split(df, idx, pd.Timestamp("2020-04-15"), 100, 1, NUM, CAT, "run_time_s").config
     b = run_split(df, idx, pd.Timestamp("2020-05-15"), 100, 1, NUM, CAT, "run_time_s").config
-    assert base_score(a) != base_score(b)            # estimated from data in xgboost >= 2
+    assert base_score(a) != base_score(b)  # estimated from data in xgboost >= 2
     assert config_fingerprint(a) == config_fingerprint(b)
-    c = run_split(df, idx, pd.Timestamp("2020-04-15"), 100, 1, NUM, CAT, "run_time_s",
-                  params={"max_depth": 3}).config
+    c = run_split(
+        df, idx, pd.Timestamp("2020-04-15"), 100, 1, NUM, CAT, "run_time_s", params={"max_depth": 3}
+    ).config
     assert config_fingerprint(a) != config_fingerprint(c)
 
 
@@ -83,12 +91,14 @@ def test_run_split_empty_returns_none():
 
 def test_exact_duplicate_row_ids(tmp_path):
     t = pd.Timestamp("2020-01-01")
-    raw = pd.DataFrame({
-        "job_id": [1, 1, 1, 2, 2, 3],
-        "name": ["a", "a", "a", None, None, "c"],
-        "submit_time": [t] * 6,
-        "run_time": [5.0, 5.0, 6.0, 7.0, 7.0, 8.0],
-    })
+    raw = pd.DataFrame(
+        {
+            "job_id": [1, 1, 1, 2, 2, 3],
+            "name": ["a", "a", "a", None, None, "c"],
+            "submit_time": [t] * 6,
+            "run_time": [5.0, 5.0, 6.0, 7.0, 7.0, 8.0],
+        }
+    )
     p = tmp_path / "raw.parquet"
     pq.write_table(pa.Table.from_pandas(raw, preserve_index=False), p)
     # row 1 copies row 0; row 4 copies row 3 (nulls compare equal); row 2 differs in run_time

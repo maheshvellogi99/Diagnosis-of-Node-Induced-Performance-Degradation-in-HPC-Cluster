@@ -17,7 +17,7 @@ import numpy as np
 from hpcdiag.layer3 import bayes as BY
 from hpcdiag.layer3 import evalue as EV
 from hpcdiag.layer3.evalue import Bets, conformal_p
-from hpcdiag.layer3.probes import CAUSES, HYPOTHESES
+from hpcdiag.layer3.probes import CAUSES, HYPOTHESES, sig
 from hpcdiag.stats.ebh import ebh_log
 from hpcdiag.stats.restart import restart_init, restart_logP, restart_step
 
@@ -40,7 +40,7 @@ class Belief:
 
     means: np.ndarray  # (n_states, n_probes)
     hyp: np.ndarray
-    sigma: float
+    sigma: float | np.ndarray  # one sigma, or one per probe (D113)
     conf: np.ndarray
     bets: Bets
     pi0: np.ndarray
@@ -57,7 +57,7 @@ class World:
 
     pools: list  # sorted pool per probe
     means: np.ndarray  # true mean (len(HYPOTHESES), n_probes) at this scenario's s
-    sigma: float
+    sigma: float | np.ndarray  # one sigma, or one per probe (D113)
     conf: np.ndarray
     cause: np.ndarray
     onset_idx: np.ndarray  # first evaluation index at or after onset; large = never
@@ -75,7 +75,9 @@ def gain_order(pi: np.ndarray, unused: list[int], bel: Belief, by_cost: bool) ->
     best, best_v = unused[0], -np.inf
     for a in unused:
         if a < na:
-            e = BY.expected_entropy_gauss(pi, bel.means[:, a], bel.sigma, bel.hyp, bel.z, bel.w)
+            e = BY.expected_entropy_gauss(
+                pi, bel.means[:, a], sig(bel.sigma, a), bel.hyp, bel.z, bel.w
+            )
         else:
             e = BY.expected_entropy_tel(pi, bel.hyp, bel.conf)
         v = (h_now - e) / (bel.cost[a] if by_cost else 1.0)
@@ -99,8 +101,8 @@ def fixed_pool_healthy_growth(a: int, w: np.ndarray, bel: Belief, wld: World) ->
     if wld.healthy_bins is None:
         wld.healthy_bins = np.stack(
             [
-                EV.bin_probs(np.array([0.0]), wld.sigma, pool, bel.bets.edges)[0]
-                for pool in wld.pools
+                EV.bin_probs(np.array([0.0]), sig(wld.sigma, i), pool, bel.bets.edges)[0]
+                for i, pool in enumerate(wld.pools)
             ]
         )
     return float(wld.healthy_bins[a] @ bel.bets.log_f_bins(a, w))
@@ -157,14 +159,14 @@ def investigate(
         seq.append(a)
         unused.remove(a)
         if a < na:
-            y = float(rng.normal(wld.means[state, a], wld.sigma))
+            y = float(rng.normal(wld.means[state, a], sig(wld.sigma, a)))
             p = float(conformal_p(np.array([y]), wld.pools[a], rng.uniform(size=1))[0])
             w = bel.bets.weights(pi, bel.hyp)  # before this probe's update
             g = bel.bets.mixture(a, w)
             if state == 0 and log_growth:
                 hg.append(fixed_pool_healthy_growth(a, w, bel, wld))
             dlog += float(np.log(bel.bets.f(np.array([p]), g)[0]))
-            pi = BY.update_gauss(pi, bel.means[:, a], bel.sigma, y)
+            pi = BY.update_gauss(pi, bel.means[:, a], sig(bel.sigma, a), y)
         else:
             o = int(rng.choice(len(HYPOTHESES), p=wld.conf[state]))
             pi = BY.update_tel(pi, bel.hyp, bel.conf, o)

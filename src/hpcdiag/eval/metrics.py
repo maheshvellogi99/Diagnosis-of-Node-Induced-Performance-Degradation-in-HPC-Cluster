@@ -51,8 +51,11 @@ def tare_metrics(y, yhat, nodes, min_y_exclusive: float = 30.0, clip_min: float 
     y, yhat, nodes = (np.asarray(v, float) for v in (y, yhat, nodes))
     m = y > min_y_exclusive
     yc = np.maximum(yhat[m], clip_min)
-    return {"n": int(m.sum()), "a_geo": a_geo(y[m], yc, nodes[m]) if m.any() else float("nan"),
-            "under_rate": under_rate(y[m], yc) if m.any() else float("nan")}
+    return {
+        "n": int(m.sum()),
+        "a_geo": a_geo(y[m], yc, nodes[m]) if m.any() else float("nan"),
+        "under_rate": under_rate(y[m], yc) if m.any() else float("nan"),
+    }
 
 
 def log_ratio(y, yhat) -> np.ndarray:
@@ -70,8 +73,9 @@ def bin_labels_for(y: np.ndarray, edges_h: list[float], labels: list[str]) -> np
     return np.asarray(labels, dtype=object)[idx]
 
 
-def per_bin_table(y, yhat, edges_h: list[float], labels: list[str],
-                  r_min_y_exclusive: float = 30.0) -> pd.DataFrame:
+def per_bin_table(
+    y, yhat, edges_h: list[float], labels: list[str], r_min_y_exclusive: float = 30.0
+) -> pd.DataFrame:
     """Per actual-runtime bin: n, RMSE h, MAE h, mean signed error h (all jobs, unclipped yhat);
     median r, UnderRate (jobs with y > r_min_y_exclusive; r uses max(yhat, 1))."""
     y, yhat = np.asarray(y, float), np.asarray(yhat, float)
@@ -80,17 +84,22 @@ def per_bin_table(y, yhat, edges_h: list[float], labels: list[str],
     for lab in labels:
         m = b == lab
         mr = m & (y > r_min_y_exclusive)
-        rows.append({
-            "bin": lab, "n": int(m.sum()),
-            "rmse_h": rmse_h(y[m], yhat[m]) if m.any() else np.nan,
-            "mae_h": mae_h(y[m], yhat[m]) if m.any() else np.nan,
-            "mean_signed_error_h": mean_signed_error_h(y[m], yhat[m]) if m.any() else np.nan,
-            "mean_actual_h": float(y[m].mean() / H) if m.any() else np.nan,
-            "mean_pred_h": float(yhat[m].mean() / H) if m.any() else np.nan,
-            "n_r": int(mr.sum()),
-            "median_r": float(np.median(log_ratio(y[mr], yhat[mr]))) if mr.any() else np.nan,
-            "under_rate_r": under_rate(y[mr], np.maximum(yhat[mr], 1.0)) if mr.any() else np.nan,
-        })
+        rows.append(
+            {
+                "bin": lab,
+                "n": int(m.sum()),
+                "rmse_h": rmse_h(y[m], yhat[m]) if m.any() else np.nan,
+                "mae_h": mae_h(y[m], yhat[m]) if m.any() else np.nan,
+                "mean_signed_error_h": mean_signed_error_h(y[m], yhat[m]) if m.any() else np.nan,
+                "mean_actual_h": float(y[m].mean() / H) if m.any() else np.nan,
+                "mean_pred_h": float(yhat[m].mean() / H) if m.any() else np.nan,
+                "n_r": int(mr.sum()),
+                "median_r": float(np.median(log_ratio(y[mr], yhat[mr]))) if mr.any() else np.nan,
+                "under_rate_r": under_rate(y[mr], np.maximum(yhat[mr], 1.0))
+                if mr.any()
+                else np.nan,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -99,5 +108,9 @@ def qualitative_gate(table: pd.DataFrame, long_bin: str = ">2d") -> dict:
     med = table.set_index("bin")["median_r"]
     v = float(med[long_bin])
     lowest = bool(np.isfinite(v) and v == med.min(skipna=True))
-    return {"median_r_long_bin": v, "negative": bool(v < 0), "lowest": lowest,
-            "pass": bool(v < 0 and lowest)}
+    return {
+        "median_r_long_bin": v,
+        "negative": bool(v < 0),
+        "lowest": lowest,
+        "pass": bool(v < 0 and lowest),
+    }

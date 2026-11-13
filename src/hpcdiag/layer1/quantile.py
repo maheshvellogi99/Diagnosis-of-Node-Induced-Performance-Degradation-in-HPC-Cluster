@@ -13,8 +13,7 @@ def log_runtime(run_time_s: np.ndarray) -> np.ndarray:
 
 def fit_quantile(X, y, tau: float, params: dict, seed: int) -> lgb.LGBMRegressor:
     """LightGBM with objective='quantile', alpha=tau."""
-    m = lgb.LGBMRegressor(objective="quantile", alpha=tau, random_state=seed, verbose=-1,
-                          **params)
+    m = lgb.LGBMRegressor(objective="quantile", alpha=tau, random_state=seed, verbose=-1, **params)
     return m.fit(X, y)
 
 

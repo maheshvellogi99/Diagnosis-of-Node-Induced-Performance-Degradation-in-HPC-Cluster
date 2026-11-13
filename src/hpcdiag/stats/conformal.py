@@ -71,8 +71,9 @@ def conformal_upper_offset(cal_scores: np.ndarray, alpha: float) -> float:
     return float("inf") if k > n else float(cal[k - 1])
 
 
-def smoothed_split_pvalues(cal_scores: np.ndarray, test_scores: np.ndarray,
-                           theta: np.ndarray) -> np.ndarray:
+def smoothed_split_pvalues(
+    cal_scores: np.ndarray, test_scores: np.ndarray, theta: np.ndarray
+) -> np.ndarray:
     """Smoothed split-conformal p-values (Mode A, D23):
     p_j = (#{i in C : S_i > S_j} + theta_j (1 + #{i in C : S_i = S_j})) / (|C| + 1)."""
     cal = np.sort(np.asarray(cal_scores, dtype="float64"))
@@ -86,10 +87,15 @@ def smoothed_split_pvalues(cal_scores: np.ndarray, test_scores: np.ndarray,
     return (n_gt + th * (1.0 + n_eq)) / (len(cal) + 1.0)
 
 
-def sliding_window_pvalues(scores: np.ndarray, end_ns: np.ndarray, theta: np.ndarray,
-                           window_ns: int, min_ref: int,
-                           keys: np.ndarray | None = None,
-                           query_scores: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+def sliding_window_pvalues(
+    scores: np.ndarray,
+    end_ns: np.ndarray,
+    theta: np.ndarray,
+    window_ns: int,
+    min_ref: int,
+    keys: np.ndarray | None = None,
+    query_scores: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Mode P (D22): pooled sliding-window smoothed conformal p-values.
 
     Inputs must be in D14 order (end_time, then row_id). For job j the reference set R_j is all

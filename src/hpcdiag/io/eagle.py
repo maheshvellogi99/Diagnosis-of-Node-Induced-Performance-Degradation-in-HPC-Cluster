@@ -20,9 +20,22 @@ from hpcdiag.io.contract import (
 )
 
 RAW_COLUMNS = [
-    "job_id", "user", "account", "partition", "qos", "wallclock_req", "nodes_req",
-    "processors_req", "gpus_req", "mem_req", "submit_time", "start_time", "end_time",
-    "run_time", "state", "name",
+    "job_id",
+    "user",
+    "account",
+    "partition",
+    "qos",
+    "wallclock_req",
+    "nodes_req",
+    "processors_req",
+    "gpus_req",
+    "mem_req",
+    "submit_time",
+    "start_time",
+    "end_time",
+    "run_time",
+    "state",
+    "name",
 ]  # work_dir and submit_line are not needed by any phase
 
 

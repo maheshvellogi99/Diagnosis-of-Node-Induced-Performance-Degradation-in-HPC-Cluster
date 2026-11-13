@@ -32,9 +32,13 @@ class LabelEncoder:
         return np.where(hit, pos_c, self.unseen).astype("int64")
 
 
-def encode_frame(train: pd.DataFrame, test: pd.DataFrame, numeric: list[str],
-                 categorical: list[str], unseen: int = -1
-                 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
+def encode_frame(
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    numeric: list[str],
+    categorical: list[str],
+    unseen: int = -1,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
     """Feature matrices for one split. Encoders see only `train`. Returns (X_train, X_test,
     number of training classes per categorical column)."""
     xtr = train[numeric].astype("float64").copy()

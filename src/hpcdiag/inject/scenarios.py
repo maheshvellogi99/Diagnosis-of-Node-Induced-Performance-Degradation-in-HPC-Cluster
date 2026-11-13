@@ -15,10 +15,25 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-TRUTH_COLUMNS = ["node_id", "onset_time", "end_time", "factor", "kind", "cause", "user",
-                 "scenario_id"]
-CHANGE_COLUMNS = ["row_id", "run_time_s", "end_time", "state", "censored", "factor_applied",
-                  "censored_by_injection"]
+TRUTH_COLUMNS = [
+    "node_id",
+    "onset_time",
+    "end_time",
+    "factor",
+    "kind",
+    "cause",
+    "user",
+    "scenario_id",
+]
+CHANGE_COLUMNS = [
+    "row_id",
+    "run_time_s",
+    "end_time",
+    "state",
+    "censored",
+    "factor_applied",
+    "censored_by_injection",
+]
 
 
 @dataclass
@@ -43,15 +58,38 @@ class Window:
 
 
 def empty_changes() -> pd.DataFrame:
-    return pd.DataFrame({c: pd.Series(dtype=t) for c, t in zip(
-        CHANGE_COLUMNS, ["int64", "float64", "datetime64[us]", "str", "bool", "float64", "bool"],
-        strict=True)})
+    return pd.DataFrame(
+        {
+            c: pd.Series(dtype=t)
+            for c, t in zip(
+                CHANGE_COLUMNS,
+                ["int64", "float64", "datetime64[us]", "str", "bool", "float64", "bool"],
+                strict=True,
+            )
+        }
+    )
 
 
 def empty_truth() -> pd.DataFrame:
-    return pd.DataFrame({c: pd.Series(dtype=t) for c, t in zip(
-        TRUTH_COLUMNS, ["Int64", "datetime64[us]", "datetime64[us]", "float64", "str", "str",
-                        "str", "str"], strict=True)})
+    return pd.DataFrame(
+        {
+            c: pd.Series(dtype=t)
+            for c, t in zip(
+                TRUTH_COLUMNS,
+                [
+                    "Int64",
+                    "datetime64[us]",
+                    "datetime64[us]",
+                    "float64",
+                    "str",
+                    "str",
+                    "str",
+                    "str",
+                ],
+                strict=True,
+            )
+        }
+    )
 
 
 def apply_multiplier(jobs: pd.DataFrame, row_ids: np.ndarray, mult: np.ndarray) -> pd.DataFrame:
@@ -65,15 +103,17 @@ def apply_multiplier(jobs: pd.DataFrame, row_ids: np.ndarray, mult: np.ndarray) 
     Tn = np.where(cens, np.maximum(T, limit), raw)
     start = j["start_time"].to_numpy().astype("datetime64[us]")
     end = start + np.round(Tn * 1e6).astype("int64").astype("timedelta64[us]")
-    return pd.DataFrame({
-        "row_id": np.asarray(row_ids, dtype="int64"),
-        "run_time_s": Tn,
-        "end_time": end,
-        "state": np.where(cens, "TIMEOUT", j["state"].to_numpy(dtype=object)).astype(str),
-        "censored": cens | j["censored"].to_numpy(bool),
-        "factor_applied": np.asarray(mult, float),
-        "censored_by_injection": cens & ~j["censored"].to_numpy(bool),
-    })
+    return pd.DataFrame(
+        {
+            "row_id": np.asarray(row_ids, dtype="int64"),
+            "run_time_s": Tn,
+            "end_time": end,
+            "state": np.where(cens, "TIMEOUT", j["state"].to_numpy(dtype=object)).astype(str),
+            "censored": cens | j["censored"].to_numpy(bool),
+            "factor_applied": np.asarray(mult, float),
+            "censored_by_injection": cens & ~j["censored"].to_numpy(bool),
+        }
+    )
 
 
 def balanced_causes(rng: np.random.Generator, causes: list[str], k: int) -> np.ndarray:
@@ -81,9 +121,14 @@ def balanced_causes(rng: np.random.Generator, causes: list[str], k: int) -> np.n
     return rng.permutation(np.resize(np.asarray(causes, dtype=object), k)).astype(str)
 
 
-def draw_degraded_nodes(rng: np.random.Generator, active_nodes: np.ndarray, k: int,
-                        window: Window, causes: list[str],
-                        max_redraws: int) -> tuple[pd.DataFrame, int]:
+def draw_degraded_nodes(
+    rng: np.random.Generator,
+    active_nodes: np.ndarray,
+    k: int,
+    window: Window,
+    causes: list[str],
+    max_redraws: int,
+) -> tuple[pd.DataFrame, int]:
     """K distinct nodes, an independent onset per node (D34), balanced causes."""
     nodes = np.sort(rng.choice(np.asarray(active_nodes), size=k, replace=False))
     onsets, redraws = [], 0
@@ -91,14 +136,25 @@ def draw_degraded_nodes(rng: np.random.Generator, active_nodes: np.ndarray, k: i
         t, r = window.draw(rng, max_redraws)
         onsets.append(t)
         redraws += r
-    return pd.DataFrame({"node_id": nodes.astype("int64"),
-                         "onset_time": pd.to_datetime(onsets).astype("datetime64[us]"),
-                         "cause": balanced_causes(rng, causes, k)}), redraws
+    return pd.DataFrame(
+        {
+            "node_id": nodes.astype("int64"),
+            "onset_time": pd.to_datetime(onsets).astype("datetime64[us]"),
+            "cause": balanced_causes(rng, causes, k),
+        }
+    ), redraws
 
 
-def node_scenario(jobs: pd.DataFrame, job_nodes: pd.DataFrame, degraded: pd.DataFrame,
-                  s: float, partial: bool, eligible: np.ndarray, trace_end: pd.Timestamp,
-                  scenario_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+def node_scenario(
+    jobs: pd.DataFrame,
+    job_nodes: pd.DataFrame,
+    degraded: pd.DataFrame,
+    s: float,
+    partial: bool,
+    eligible: np.ndarray,
+    trace_end: pd.Timestamp,
+    scenario_id: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """node: jobs on a degraded node starting at/after that node's onset get T' = s T.
     node_partial: T' = T (1 + (s - 1) phi), phi = fraction of the job's time after t*, where t* is
     the earliest onset among the job's degraded nodes that falls before the job's end."""
@@ -107,31 +163,47 @@ def node_scenario(jobs: pd.DataFrame, job_nodes: pd.DataFrame, degraded: pd.Data
     x = x.merge(ej, on="row_id")
     if partial:
         x = x[x["onset_time"] < x["end_time"]]
-        g = x.groupby("row_id").agg(t=("onset_time", "min"), start=("start_time", "first"),
-                                    end=("end_time", "first"), T=("run_time_s", "first"))
+        g = x.groupby("row_id").agg(
+            t=("onset_time", "min"),
+            start=("start_time", "first"),
+            end=("end_time", "first"),
+            T=("run_time_s", "first"),
+        )
         after = (g["end"] - g["t"]).dt.total_seconds().to_numpy()
         T = g["T"].to_numpy(float)
         with np.errstate(divide="ignore", invalid="ignore"):
-            phi = np.where(T > 0, np.clip(after / T, 0.0, 1.0),
-                           (g["start"] >= g["t"]).to_numpy().astype(float))
+            phi = np.where(
+                T > 0, np.clip(after / T, 0.0, 1.0), (g["start"] >= g["t"]).to_numpy().astype(float)
+            )
         mult = 1.0 + (s - 1.0) * phi
         rows = g.index.to_numpy()
     else:
         rows = np.sort(x.loc[x["start_time"] >= x["onset_time"], "row_id"].unique())
         mult = np.full(len(rows), s)
     changes = apply_multiplier(jobs, rows, mult) if len(rows) else empty_changes()
-    truth = pd.DataFrame({
-        "node_id": degraded["node_id"].astype("Int64"), "onset_time": degraded["onset_time"],
-        "end_time": pd.Series(trace_end, index=degraded.index).astype("datetime64[us]"),
-        "factor": float(s), "kind": "node_partial" if partial else "node",
-        "cause": degraded["cause"].astype(str),
-        "user": pd.Series(None, index=degraded.index, dtype="str"),
-        "scenario_id": scenario_id})[TRUTH_COLUMNS]
+    truth = pd.DataFrame(
+        {
+            "node_id": degraded["node_id"].astype("Int64"),
+            "onset_time": degraded["onset_time"],
+            "end_time": pd.Series(trace_end, index=degraded.index).astype("datetime64[us]"),
+            "factor": float(s),
+            "kind": "node_partial" if partial else "node",
+            "cause": degraded["cause"].astype(str),
+            "user": pd.Series(None, index=degraded.index, dtype="str"),
+            "scenario_id": scenario_id,
+        }
+    )[TRUTH_COLUMNS]
     return changes, truth
 
 
-def decoy_draw(rng: np.random.Generator, jobs: pd.DataFrame, main_pop: np.ndarray, window: Window,
-               min_jobs: int, max_redraws: int) -> tuple[pd.Timestamp, str, int]:
+def decoy_draw(
+    rng: np.random.Generator,
+    jobs: pd.DataFrame,
+    main_pop: np.ndarray,
+    window: Window,
+    min_jobs: int,
+    max_redraws: int,
+) -> tuple[pd.Timestamp, str, int]:
     """t0 from the window, then a user with >= min_jobs main-population jobs starting after t0;
     t0 is redrawn if no user qualifies (D34). Returns (t0, user, t0 redraws incl. gap redraws)."""
     mp = jobs.loc[main_pop, ["user", "start_time"]]
@@ -147,52 +219,89 @@ def decoy_draw(rng: np.random.Generator, jobs: pd.DataFrame, main_pop: np.ndarra
     raise RuntimeError("no decoy user qualifies")
 
 
-def heavy_decoy_draw(rng: np.random.Generator, jobs: pd.DataFrame, main_pop: np.ndarray,
-                     window: Window, top_n: int,
-                     max_redraws: int) -> tuple[pd.Timestamp, str, int, int, int]:
+def heavy_decoy_draw(
+    rng: np.random.Generator,
+    jobs: pd.DataFrame,
+    main_pop: np.ndarray,
+    window: Window,
+    top_n: int,
+    max_redraws: int,
+) -> tuple[pd.Timestamp, str, int, int, int]:
     """D36: t0 from the window, then a user drawn uniformly from the top_n users by number of
     main-population jobs starting at/after t0 (ties broken by user id). Returns
     (t0, user, rank 1..top_n, that user's main-population jobs after t0, gap redraws)."""
     mp = jobs.loc[main_pop, ["user", "start_time"]]
     t0, red = window.draw(rng, max_redraws)
     counts = mp.loc[mp["start_time"] >= t0, "user"].astype(str).value_counts()
-    top = (counts.rename("n").reset_index().rename(columns={"index": "user"})
-           .sort_values(["n", "user"], ascending=[False, True]).head(top_n))
+    top = (
+        counts.rename("n")
+        .reset_index()
+        .rename(columns={"index": "user"})
+        .sort_values(["n", "user"], ascending=[False, True])
+        .head(top_n)
+    )
     if top.empty:
         raise RuntimeError("no main-population jobs after t0")
     i = int(rng.integers(len(top)))
     return t0, str(top["user"].iloc[i]), i + 1, int(top["n"].iloc[i]), red
 
 
-def decoy_scenario(jobs: pd.DataFrame, eligible: np.ndarray, t0: pd.Timestamp, user: str, s: float,
-                   trace_end: pd.Timestamp, scenario_id: str,
-                   kind: str = "user_decoy") -> tuple[pd.DataFrame, pd.DataFrame]:
-    m = (eligible & (jobs["user"].astype(str).to_numpy() == user)
-         & (jobs["start_time"] >= t0).to_numpy())
+def decoy_scenario(
+    jobs: pd.DataFrame,
+    eligible: np.ndarray,
+    t0: pd.Timestamp,
+    user: str,
+    s: float,
+    trace_end: pd.Timestamp,
+    scenario_id: str,
+    kind: str = "user_decoy",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    m = (
+        eligible
+        & (jobs["user"].astype(str).to_numpy() == user)
+        & (jobs["start_time"] >= t0).to_numpy()
+    )
     rows = jobs.loc[m, "row_id"].to_numpy()
     changes = apply_multiplier(jobs, rows, np.full(len(rows), s)) if len(rows) else empty_changes()
-    truth = pd.DataFrame({"node_id": pd.array([None], dtype="Int64"),
-                          "onset_time": pd.to_datetime([t0]).astype("datetime64[us]"),
-                          "end_time": pd.to_datetime([trace_end]).astype("datetime64[us]"),
-                          "factor": [float(s)], "kind": [kind],
-                          "cause": pd.array([None], dtype="str"), "user": [user],
-                          "scenario_id": [scenario_id]})[TRUTH_COLUMNS]
+    truth = pd.DataFrame(
+        {
+            "node_id": pd.array([None], dtype="Int64"),
+            "onset_time": pd.to_datetime([t0]).astype("datetime64[us]"),
+            "end_time": pd.to_datetime([trace_end]).astype("datetime64[us]"),
+            "factor": [float(s)],
+            "kind": [kind],
+            "cause": pd.array([None], dtype="str"),
+            "user": [user],
+            "scenario_id": [scenario_id],
+        }
+    )[TRUTH_COLUMNS]
     return changes, truth
 
 
-def shock_scenario(jobs: pd.DataFrame, eligible: np.ndarray, t1: pd.Timestamp, hours: float,
-                   s: float, scenario_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+def shock_scenario(
+    jobs: pd.DataFrame,
+    eligible: np.ndarray,
+    t1: pd.Timestamp,
+    hours: float,
+    s: float,
+    scenario_id: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Jobs whose ORIGINAL end_time is in [t1, t1 + hours] get T' = s T."""
     t2 = t1 + pd.Timedelta(hours=hours)
     e = jobs["end_time"]
     m = eligible & ((e >= t1) & (e <= t2)).to_numpy()
     rows = jobs.loc[m, "row_id"].to_numpy()
     changes = apply_multiplier(jobs, rows, np.full(len(rows), s)) if len(rows) else empty_changes()
-    truth = pd.DataFrame({"node_id": pd.array([None], dtype="Int64"),
-                          "onset_time": pd.to_datetime([t1]).astype("datetime64[us]"),
-                          "end_time": pd.to_datetime([t2]).astype("datetime64[us]"),
-                          "factor": [float(s)], "kind": ["system_shock"],
-                          "cause": pd.array([None], dtype="str"),
-                          "user": pd.array([None], dtype="str"),
-                          "scenario_id": [scenario_id]})[TRUTH_COLUMNS]
+    truth = pd.DataFrame(
+        {
+            "node_id": pd.array([None], dtype="Int64"),
+            "onset_time": pd.to_datetime([t1]).astype("datetime64[us]"),
+            "end_time": pd.to_datetime([t2]).astype("datetime64[us]"),
+            "factor": [float(s)],
+            "kind": ["system_shock"],
+            "cause": pd.array([None], dtype="str"),
+            "user": pd.array([None], dtype="str"),
+            "scenario_id": [scenario_id],
+        }
+    )[TRUTH_COLUMNS]
     return changes, truth

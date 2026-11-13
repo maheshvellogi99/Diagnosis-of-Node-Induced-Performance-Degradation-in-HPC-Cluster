@@ -57,28 +57,38 @@ class TailCache:
         p = p[np.isfinite(p)]
         n = len(p)
         if n not in self._null:
-            self._null[n] = tail_checks(p, self.t["null_sims"], self.t["null_seed"],
-                                        self.t["thresholds"], self.t["kappas"])["null_mean_f"]
+            self._null[n] = tail_checks(
+                p, self.t["null_sims"], self.t["null_seed"], self.t["thresholds"], self.t["kappas"]
+            )["null_mean_f"]
         mf = float(mixture_calibrator(p, self.t["kappas"]).mean())
-        return {"n": n, "p_le": {f"{x:g}": float(np.mean(p <= x)) for x in self.t["thresholds"]},
-                "mean_f": mf, "null_mean_f": self._null[n],
-                "mean_f_le_null_p95": bool(mf <= self._null[n]["p95"]),
-                "kappas": list(self.t["kappas"])}
+        return {
+            "n": n,
+            "p_le": {f"{x:g}": float(np.mean(p <= x)) for x in self.t["thresholds"]},
+            "mean_f": mf,
+            "null_mean_f": self._null[n],
+            "mean_f_le_null_p95": bool(mf <= self._null[n]["p95"]),
+            "kappas": list(self.t["kappas"]),
+        }
 
 
 def _aci_global(p: np.ndarray, cfg: dict) -> dict:
     a = cfg["alarms"]
     one = np.zeros(len(p), dtype=int)
-    return {f"{g:g}": float(aci_alarms(p, one, a["alpha_job"], g)[0].mean())
-            for g in a["aci_gammas"]}
+    return {
+        f"{g:g}": float(aci_alarms(p, one, a["alpha_job"], g)[0].mean()) for g in a["aci_gammas"]
+    }
 
 
 def _basic(p: np.ndarray, cfg: dict, tail: TailCache) -> dict:
     p = np.asarray(p, float)
     p = p[np.isfinite(p)]
-    return {"n": int(len(p)), "ks": CM.ks_distance(p),
-            "fa": CM.fa_by_alpha(p, cfg["alarms"]["alphas"]),
-            "tail": tail(p), "aci_global": _aci_global(p, cfg)}
+    return {
+        "n": int(len(p)),
+        "ks": CM.ks_distance(p),
+        "fa": CM.fa_by_alpha(p, cfg["alarms"]["alphas"]),
+        "tail": tail(p),
+        "aci_global": _aci_global(p, cfg),
+    }
 
 
 def _deciles(df: pd.DataFrame, p: np.ndarray, alpha: float) -> dict:
@@ -87,9 +97,16 @@ def _deciles(df: pd.DataFrame, p: np.ndarray, alpha: float) -> dict:
         if col in df:
             d = df[col].to_numpy()
             ok = np.isfinite(p)
-            out[col] = [{"decile": k + 1, "n": int(((d == k) & ok).sum()),
-                         "fa": float(np.mean(p[(d == k) & ok] <= alpha))
-                         if ((d == k) & ok).any() else float("nan")} for k in range(10)]
+            out[col] = [
+                {
+                    "decile": k + 1,
+                    "n": int(((d == k) & ok).sum()),
+                    "fa": float(np.mean(p[(d == k) & ok] <= alpha))
+                    if ((d == k) & ok).any()
+                    else float("nan"),
+                }
+                for k in range(10)
+            ]
     return out
 
 
@@ -103,39 +120,60 @@ def gate2_l2(m: dict, cfg: dict) -> dict:
         "ks": {"value": m["ks"], "max": g["ks_max"], "ok": bool(m["ks"] <= g["ks_max"])},
         "fa": {"value": m["fa"], "tol": g["fa_tol"], "ok": fa_ok},
         "p_le_1e-3": {"value": p3, "max": g["p_le_1e3_max"], "ok": bool(p3 <= g["p_le_1e3_max"])},
-        "mean_f": {"value": m["tail"]["mean_f"], "null_p95": m["tail"]["null_mean_f"]["p95"],
-                   "ok": m["tail"]["mean_f_le_null_p95"]},
-        "aci_global": {"value": aci, "target": a["alpha_job"], "tol": g["aci_tol"],
-                       "ok": bool(abs(aci - a["alpha_job"]) <= g["aci_tol"])},
+        "mean_f": {
+            "value": m["tail"]["mean_f"],
+            "null_p95": m["tail"]["null_mean_f"]["p95"],
+            "ok": m["tail"]["mean_f_le_null_p95"],
+        },
+        "aci_global": {
+            "value": aci,
+            "target": a["alpha_job"],
+            "tol": g["aci_tol"],
+            "ok": bool(abs(aci - a["alpha_job"]) <= g["aci_tol"]),
+        },
     }
-    ok = (checks["ks"]["ok"] and all(fa_ok.values()) and checks["p_le_1e-3"]["ok"]
-          and checks["mean_f"]["ok"] and checks["aci_global"]["ok"])
+    ok = (
+        checks["ks"]["ok"]
+        and all(fa_ok.values())
+        and checks["p_le_1e-3"]["ok"]
+        and checks["mean_f"]["ok"]
+        and checks["aci_global"]["ok"]
+    )
     return {"checks": checks, "pass": bool(ok)}
 
 
 def _drift(df: pd.DataFrame, p: np.ndarray, alpha: float, k: int = 10) -> dict:
     """Per-group drift for the original Gate 2 report: FA by month, per top-k user FA and KS."""
     month = df["end_time"].dt.to_period("M").astype(str).to_numpy()
-    by_month = [{"month": mo, "n": int((month == mo).sum()),
-                 "fa": float(np.mean(p[month == mo] <= alpha))} for mo in sorted(set(month))]
+    by_month = [
+        {"month": mo, "n": int((month == mo).sum()), "fa": float(np.mean(p[month == mo] <= alpha))}
+        for mo in sorted(set(month))
+    ]
     users = df["user"].astype(str)
     top = users.value_counts().head(k)
     by_user = []
     for u, n in top.items():
         pu = p[(users == u).to_numpy()]
         half = len(pu) // 2
-        by_user.append({"user": u, "n": int(n), "fa": float(np.mean(pu <= alpha)),
-                        "ks": CM.ks_distance(pu),
-                        "fa_first_half": float(np.mean(pu[:half] <= alpha)),
-                        "fa_second_half": float(np.mean(pu[half:] <= alpha))})
+        by_user.append(
+            {
+                "user": u,
+                "n": int(n),
+                "fa": float(np.mean(pu <= alpha)),
+                "ks": CM.ks_distance(pu),
+                "fa_first_half": float(np.mean(pu[:half] <= alpha)),
+                "fa_second_half": float(np.mean(pu[half:] <= alpha)),
+            }
+        )
     return {"fa_by_month": by_month, "top_users": by_user}
 
 
 # ----------------------------------------------------------------------------- Mode P
 
 
-def mode_p(df: pd.DataFrame, cfg: dict, window_h: float, variant: str,
-           theta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def mode_p(
+    df: pd.DataFrame, cfg: dict, window_h: float, variant: str, theta: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     """Mode P p-values on the stored Mode E scores (df in D14 order)."""
     mp = cfg["mode_p"]
     s = df["score"].to_numpy()
@@ -147,8 +185,9 @@ def mode_p(df: pd.DataFrame, cfg: dict, window_h: float, variant: str,
         return sliding_window_pvalues(s, e, theta, w, mp["min_ref"], df["dec_qhat"].to_numpy())
     if variant == "user_first":
         # exploratory, our definition: user's own window if it holds >= min_ref jobs, else pooled
-        pu, nu = sliding_window_pvalues(s, e, theta, w, mp["min_ref"],
-                                        df["user"].astype(str).to_numpy())
+        pu, nu = sliding_window_pvalues(
+            s, e, theta, w, mp["min_ref"], df["user"].astype(str).to_numpy()
+        )
         pg, ng = sliding_window_pvalues(s, e, theta, w, mp["min_ref"])
         use_u = np.isfinite(pu)
         return np.where(use_u, pu, pg), np.where(use_u, nu, ng)
@@ -159,14 +198,19 @@ def node_check(df: pd.DataFrame, p: np.ndarray, cfg: dict) -> dict:
     """Step 9, exploratory: per-node alarm rates on unmodified PM100 (NOT valid tests)."""
     nc = cfg["node_check"]
     ok = np.isfinite(p)
-    jobs = pd.DataFrame({"row_id": df["row_id"].to_numpy()[ok],
-                         "alarm": p[ok] <= nc["alpha"],
-                         "user": df["user"].astype(str).to_numpy()[ok]})
+    jobs = pd.DataFrame(
+        {
+            "row_id": df["row_id"].to_numpy()[ok],
+            "alarm": p[ok] <= nc["alpha"],
+            "user": df["user"].astype(str).to_numpy()[ok],
+        }
+    )
     jn = pd.read_parquet(resolve(nc["job_nodes"]), columns=["row_id", "node_id"])
     x = jn.merge(jobs, on="row_id", how="inner")
     overall = float(jobs["alarm"].mean())
-    g = x.groupby("node_id").agg(n=("alarm", "size"), alarms=("alarm", "sum"),
-                                 users=("user", "nunique"))
+    g = x.groupby("node_id").agg(
+        n=("alarm", "size"), alarms=("alarm", "sum"), users=("user", "nunique")
+    )
     g = g[g["n"] >= nc["min_jobs"]].copy()
     g["rate"] = g["alarms"] / g["n"]
     g["binom_upper_p"] = stats.binom.sf(g["alarms"] - 1, g["n"], overall)
@@ -174,15 +218,26 @@ def node_check(df: pd.DataFrame, p: np.ndarray, cfg: dict) -> dict:
     var_binom = float(np.mean(overall * (1 - overall) / g["n"]))
     top = g.sort_values(["binom_upper_p", "rate"], ascending=[True, False]).head(10)
     return {
-        "warning": ("multi-node jobs make nodes dependent; these binomial p-values are NOT "
-                    "valid tests"),
-        "alpha": nc["alpha"], "overall_alarm_rate": overall, "n_nodes": int(len(g)),
-        "min_jobs": nc["min_jobs"], "dispersion_ratio": var_obs / var_binom,
+        "warning": (
+            "multi-node jobs make nodes dependent; these binomial p-values are NOT valid tests"
+        ),
+        "alpha": nc["alpha"],
+        "overall_alarm_rate": overall,
+        "n_nodes": int(len(g)),
+        "min_jobs": nc["min_jobs"],
+        "dispersion_ratio": var_obs / var_binom,
         "rate_quantiles": {q: float(g["rate"].quantile(q)) for q in (0.1, 0.5, 0.9, 0.99)},
         "n_nodes_rate_ge_2x": int((g["rate"] >= 2 * overall).sum()),
-        "top_nodes": [{"node_id": int(i), "n": int(r["n"]), "rate": float(r["rate"]),
-                       "users": int(r["users"]), "binom_upper_p": float(r["binom_upper_p"])}
-                      for i, r in top.iterrows()],
+        "top_nodes": [
+            {
+                "node_id": int(i),
+                "n": int(r["n"]),
+                "rate": float(r["rate"]),
+                "users": int(r["users"]),
+                "binom_upper_p": float(r["binom_upper_p"]),
+            }
+            for i, r in top.iterrows()
+        ],
     }
 
 
@@ -201,8 +256,13 @@ def _run(run: Run, run_ids: list[str]) -> int:
         df = df.sort_values(["end_time", "row_id"], kind="stable").reset_index(drop=True)
         system, mode, pop = meta["system"], meta["mode"], meta["population"]
         log.info("%s: %s Mode %s %s, %d rows", rid, system, mode, pop, len(df))
-        r: dict = {"system": system, "mode": mode, "population": pop, "fast": meta["fast"],
-                   "source_commit": (d / "git_commit.txt").read_text().strip()}
+        r: dict = {
+            "system": system,
+            "mode": mode,
+            "population": pop,
+            "fast": meta["fast"],
+            "source_commit": (d / "git_commit.txt").read_text().strip(),
+        }
         p = df["p"].to_numpy()
         r["as_run"] = _basic(p, cfg, tail)
         r["as_run"]["deciles_alpha_job"] = _deciles(df, p, alpha)
@@ -233,41 +293,69 @@ def _run(run: Run, run_ids: list[str]) -> int:
                         m["test_days"]["gate2_l2"] = gate2_l2(m["test_days"], cfg)
                     r["mode_p"][name] = m
                     keep[name] = pp
-                    log.info("%s %s: n=%d ks=%.4f fa=%s mean_f=%.3f", rid, name, m["n"], m["ks"],
-                             {k: round(v, 4) for k, v in m["fa"].items()}, m["tail"]["mean_f"])
+                    log.info(
+                        "%s %s: n=%d ks=%.4f fa=%s mean_f=%.3f",
+                        rid,
+                        name,
+                        m["n"],
+                        m["ks"],
+                        {k: round(v, 4) for k, v in m["fa"].items()},
+                        m["tail"]["mean_f"],
+                    )
             main = f"global_{mp['main_window']}"
             noise = []
             for sd in mp["theta_noise_seeds"]:
                 th = np.random.default_rng(sd).uniform(size=len(df))
                 pp, _ = mode_p(df, cfg, mp["windows_hours"][mp["main_window"]], "global", th)
                 f = pp[np.isfinite(pp)]
-                noise.append({"seed": sd, "ks": CM.ks_distance(f),
-                              "fa": CM.fa_by_alpha(f, cfg["alarms"]["alphas"]),
-                              "p_le_1e-3": float(np.mean(f <= 1e-3)),
-                              "mean_f": float(mixture_calibrator(f, cfg["tail"]["kappas"]).mean())})
+                noise.append(
+                    {
+                        "seed": sd,
+                        "ks": CM.ks_distance(f),
+                        "fa": CM.fa_by_alpha(f, cfg["alarms"]["alphas"]),
+                        "p_le_1e-3": float(np.mean(f <= 1e-3)),
+                        "mean_f": float(mixture_calibrator(f, cfg["tail"]["kappas"]).mean()),
+                    }
+                )
             r["mode_p_theta_noise"] = noise
-            pd.DataFrame({"row_id": df["row_id"], "end_time": df["end_time"],
-                          **{f"p_{k}": v for k, v in keep.items()}}).to_parquet(
-                run.dir / f"modep_{rid}.parquet", index=False)
+            pd.DataFrame(
+                {
+                    "row_id": df["row_id"],
+                    "end_time": df["end_time"],
+                    **{f"p_{k}": v for k, v in keep.items()},
+                }
+            ).to_parquet(run.dir / f"modep_{rid}.parquet", index=False)
             pm = keep[main]
             ok = np.isfinite(pm)
             one = np.zeros(int(ok.sum()), dtype=int)
             aci, _ = aci_alarms(pm[ok], one, alpha, cfg["alarms"]["aci_gamma_default"])
-            contract = pd.DataFrame({
-                "system": system, "row_id": df["row_id"][ok], "job_id": df["job_id"][ok],
-                "end_time": df["end_time"][ok], "group_key": "pooled_window_" + mp["main_window"],
-                "q_hat": df["q_hat"][ok], "score": df["score"][ok], "p_value": pm[ok],
-                "theta": theta[ok], "alarm_fixed": pm[ok] <= alpha, "alarm_aci": aci,
-                "model_version": f"modeP:{mp['main_window']}:from:{rid}"})
+            contract = pd.DataFrame(
+                {
+                    "system": system,
+                    "row_id": df["row_id"][ok],
+                    "job_id": df["job_id"][ok],
+                    "end_time": df["end_time"][ok],
+                    "group_key": "pooled_window_" + mp["main_window"],
+                    "q_hat": df["q_hat"][ok],
+                    "score": df["score"][ok],
+                    "p_value": pm[ok],
+                    "theta": theta[ok],
+                    "alarm_fixed": pm[ok] <= alpha,
+                    "alarm_aci": aci,
+                    "model_version": f"modeP:{mp['main_window']}:from:{rid}",
+                }
+            )
             outp = resolve(
-                f"data/processed/layer1_scores_{system}_{run.run_id}_modeP_{pop}.parquet")
-            pq.write_table(pa.Table.from_pandas(contract, schema=CONTRACT, preserve_index=False),
-                           outp)
+                f"data/processed/layer1_scores_{system}_{run.run_id}_modeP_{pop}.parquet"
+            )
+            pq.write_table(
+                pa.Table.from_pandas(contract, schema=CONTRACT, preserve_index=False), outp
+            )
             r["mode_p_contract_table"] = str(outp.relative_to(resolve(".")))
             if system == "pm100" and pop == "main":
                 r["node_check_exploratory"] = node_check(df, pm, cfg)
         out["per_run"][rid] = r
-        run.write_json("metrics.json", out)       # incremental save
+        run.write_json("metrics.json", out)  # incremental save
     run.finish("ok", {"n_inputs": len(run_ids)})
     return 0
 

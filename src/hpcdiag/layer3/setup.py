@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 import numpy as np
+import pandas as pd
 
 from hpcdiag.layer3 import bayes as BY
 from hpcdiag.layer3 import evalue as EV
 from hpcdiag.layer3 import probes as PR
 from hpcdiag.layer3.simulate import Belief, World
+from hpcdiag.utils.run import resolve
 
 
 @dataclass(frozen=True)
@@ -55,10 +57,26 @@ def policy_model(pc: dict, v: Variant) -> PR.ProbeModel:
     return m
 
 
-def fixed_pools(names, sigma: float, n_pool: int, seed_key: list[int]) -> list[np.ndarray]:
-    """One sorted healthy pool per probe, in the order of names."""
+def fixed_pools(names, sigma, n_pool: int, seed_key: list[int]) -> list[np.ndarray]:
+    """One sorted healthy pool per probe, in the order of names. sigma: scalar or per probe."""
     rng = np.random.default_rng(seed_key)
-    return [np.sort(rng.normal(0, sigma, n_pool)) for _ in names]
+    return [np.sort(rng.normal(0, PR.sig(sigma, i), n_pool)) for i in range(len(names))]
+
+
+def empirical_pools(path: str, names, n_pool: int) -> list[np.ndarray]:
+    """D113: measured healthy pool. CSV with columns probe, log_x, t_start; per probe the FIRST
+    n_pool runs in time order (time order is sacred), sorted. Too few runs or a missing probe:
+    error. Floats are parsed exactly (round_trip), so a written pool reads back bit for bit."""
+    df = pd.read_csv(resolve(path), float_precision="round_trip")
+    out = []
+    for a in names:
+        d = df[df["probe"] == a].sort_values("t_start", kind="stable")
+        if len(d) < n_pool:
+            raise ValueError(
+                f"empirical pool {path}: probe {a} has {len(d)} runs, n_pool is {n_pool}"
+            )
+        out.append(np.sort(d["log_x"].to_numpy(float)[:n_pool]))
+    return out
 
 
 def telemetry_rows(cfg: dict, which: str = "oof") -> np.ndarray:
@@ -89,7 +107,7 @@ def make_belief(cfg: dict, v: Variant) -> Belief:
     return Belief(
         means=means,
         hyp=hyp,
-        sigma=m.sigma,
+        sigma=np.asarray(m.sigma, float) if np.ndim(m.sigma) else m.sigma,
         conf=telemetry_rows(cfg, v.tel_belief),
         bets=bets,
         pi0=BY.prior(hyp, po["pi0_h0"] if v.pi0_h0 is None else v.pi0_h0),
@@ -124,10 +142,18 @@ def make_world(
     elif v.misspec:
         key = [ec["pool_seed"], n_pool, 1]
     means = np.array([[m.delta(h, a, s) for a in m.names] for h in PR.HYPOTHESES])
+    if pc.get("healthy_pool"):  # D113: measured pool replaces the Gaussian pool
+        if v.redraw_pool or v.misspec:
+            raise ValueError(
+                "pool per base and misspecified rows are not defined for a measured pool"
+            )
+        pools = empirical_pools(pc["healthy_pool"], m.names, n_pool)
+    else:
+        pools = fixed_pools(m.names, sigma, n_pool, key)
     return World(
-        pools=fixed_pools(m.names, sigma, n_pool, key),
+        pools=pools,
         means=means,
-        sigma=sigma,
+        sigma=np.asarray(sigma, float) if np.ndim(sigma) else sigma,
         conf=telemetry_rows(cfg, v.tel_world),
         cause=cause,
         onset_idx=onset_idx,

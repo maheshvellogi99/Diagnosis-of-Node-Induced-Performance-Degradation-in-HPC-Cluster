@@ -23,8 +23,9 @@ def test_power_calibrator_integrates_to_one(kappa):
 
 
 def test_mixture_integrates_to_one_and_hand_value():
-    vals = [integrate.quad(lambda x, k=k: k, 0, 1, weight="alg", wvar=(k - 1, 0))[0]
-            for k in KAPPAS]
+    vals = [
+        integrate.quad(lambda x, k=k: k, 0, 1, weight="alg", wvar=(k - 1, 0))[0] for k in KAPPAS
+    ]
     assert abs(np.mean(vals) - 1) < 1e-6
     # f(1) = mean(kappa) ; f(0.01) for kappa = .5 is .5 * .01^-.5 = 5
     assert mixture_calibrator(np.array([1.0]))[0] == pytest.approx(np.mean(KAPPAS))
@@ -35,7 +36,7 @@ def test_mixture_integrates_to_one_and_hand_value():
 
 def test_null_mean_f_typically_below_one_and_tail_check_on_uniform():
     sims = null_mean_f(20_000, 200, seed=1)
-    assert np.median(sims) < 1.0                      # heavy right tail of f(U)
+    assert np.median(sims) < 1.0  # heavy right tail of f(U)
     rng = np.random.default_rng(9)
     out = tail_checks(rng.uniform(size=20_000), n_sims=200, seed=2)
     assert out["mean_f"] <= out["null_mean_f"]["p99"]
@@ -45,7 +46,7 @@ def test_null_mean_f_typically_below_one_and_tail_check_on_uniform():
 def test_tail_check_flags_heavy_tail():
     rng = np.random.default_rng(3)
     p = rng.uniform(size=20_000)
-    p[:200] = 1e-6                                     # 1% extreme p-values
+    p[:200] = 1e-6  # 1% extreme p-values
     out = tail_checks(p, n_sims=200, seed=2)
     assert not out["mean_f_le_null_p95"]
     assert out["p_le"]["0.0001"] >= 0.01
