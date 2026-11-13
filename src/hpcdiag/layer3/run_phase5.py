@@ -47,6 +47,8 @@ POLICIES: dict[str, dict] = {
     "stage": {"exclusion": "cleared_skipdone", "probes": "stage"},  # D97 with D103
     "d86": dict(D86),  # the architect's failed rule, reported row (D95)
     "design_rule": {"exclusion": "all"},
+    # Phase 5c (D109): the primary, probe evidence as a restart mixture with J from the config
+    "ig_d109": {"exclusion": "cleared_skipdone", "probe_J": "config"},
 }
 BASELINES = ("P-all", "P-IG", "P-random", "P-randnode", "P-sweep")
 L: dict = {}  # per-process state
@@ -151,19 +153,25 @@ def bel_names(cfg: dict) -> list[str]:
     return list(cfg["probes"]["names"])
 
 
-def run_one(sid, meta, truth, snap, extra, variant, base_policy, B) -> dict:
+def run_one(sid, meta, truth, snap, extra, variant, base_policy, B, k_pre=0) -> dict:
     cfg = L["cfg"]
     lc = R.G["cfg"]["layer2"]
     eval_ns, m = R.G["eval_ns"], lc["m_fixed"]
     t0 = time.time()
-    pol = SIM.Policy(f"{base_policy}_B{B}", float(B), **POLICIES[base_policy])
+    kw = dict(POLICIES[base_policy])
+    if kw.get("probe_J") == "config":
+        kw["probe_J"] = float(cfg["evalue"]["probe_J"])
+    pol = SIM.Policy(f"{base_policy}_B{B}", float(B), **kw)
     cause, onset, truth_rows = world_arrays(meta, truth, snap.shape[1])
     s = float(meta["s"]) if meta["kind"] == "node" else 1.0
     bel = _belief(variant)
     wld = ST.make_world(cfg, ST.VARIANTS[variant], s, cause, onset, key(meta["base"]), key(sid))
     rng = np.random.default_rng([cfg["seed"], key(sid), key(variant), key(pol.name)])
     excl = int(cfg["policy"]["exclude_days"] * SIM.BLOCKS_PER_DAY)
-    logE, inv = SIM.run_policy(snap, bel, wld, pol, rng, lc["alpha"], m, excl, log_growth=True)
+    pre = {n: int(k_pre) for n, _, _ in truth_rows} if k_pre else None  # D110 stress test
+    logE, inv = SIM.run_policy(
+        snap, bel, wld, pol, rng, lc["alpha"], m, excl, log_growth=True, pre=pre
+    )
     t_sim = time.time() - t0
     flags = SEL.ebh_over_time(logE, lc["alpha"], m)
     out = MT.null_metrics(flags, eval_ns)
@@ -212,6 +220,8 @@ def run_one(sid, meta, truth, snap, extra, variant, base_policy, B) -> dict:
         "variant": variant,
         "policy": base_policy,
         "B": B,
+        "probe_J": pol.probe_J,
+        "k_pre": int(k_pre),
         "metrics": out,
         "diagnosis": diag,
         "n_investigations": len(inv),
@@ -339,6 +349,36 @@ def tasks_5b(cfg: dict, idx: pd.DataFrame) -> dict[str, list]:
     return t
 
 
+def tasks_5c(cfg: dict, idx: pd.DataFrame) -> dict[str, list]:
+    """Phase 5c development evaluation (D109-D111). Reads index.parquet only; seeds 0-19.
+    The old-formula reference rows are the dev5b grid's "ig" rows; a re-run of part of them here
+    checks that they reproduce."""
+    g = cfg["grid5c"]
+    t: dict[str, list] = {}
+
+    def add(sids, runs):
+        for s in sids:
+            t.setdefault(s, []).extend(runs)
+
+    rand = idx[idx["base"] != "real"]
+    node = rand[rand["kind"] == "node"]
+    nodes = node["scenario_id"].tolist()
+    k1 = node[node["K_pct"] == 1]
+    k1_ids = k1["scenario_id"].tolist()
+    k1s13 = k1[k1["s"] == 1.3]["scenario_id"].tolist()
+    valid = rand[rand["kind"].isin(g["validity_kinds"])]["scenario_id"].tolist()
+    nulls = rand[rand["kind"] == "null"]["scenario_id"].tolist()
+    pos = [b for b in g["budgets"] if b > 0]
+    add(nodes + valid, [("main", "ig", 0)] + [("main", "ig_d109", b) for b in pos])
+    add(valid, [("pool_redraw", "ig_d109", b) for b in pos])
+    add(valid + k1_ids, [(v, "ig_d109", b) for v in g["misspec_variants"]
+                         for b in g["misspec_budgets"]])  # fmt: skip
+    add(k1s13 + nulls, [("main", "ig", g["repro_budget"])])
+    add(k1s13, [("main", p, g["stress_budget"], k) for p in ("ig", "ig_d109")
+                for k in g["stress_k_pre"]])  # fmt: skip
+    return t
+
+
 def tasks_pilot(cfg: dict, idx: pd.DataFrame) -> dict[str, list]:
     g = cfg["grid"]
     t = {}
@@ -364,9 +404,13 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
     if problems:
         raise RuntimeError(f"raw checksum problems: {problems}")
     idx = pd.read_parquet(resolve("data/processed/scenarios/index.parquet"))
-    t = {"pilot": tasks_pilot, "full": tasks_full, "addon": tasks_addon, "dev5b": tasks_5b}[mode](
-        cfg, idx
-    )
+    t = {
+        "pilot": tasks_pilot,
+        "full": tasks_full,
+        "addon": tasks_addon,
+        "dev5b": tasks_5b,
+        "dev5c": tasks_5c,
+    }[mode](cfg, idx)
     check_sealed(list(t))
     tasks = ordered(t)
     n_runs = sum(len(v) for _, v in tasks)
@@ -402,7 +446,7 @@ def _run(run: Run, config_path: str, mode: str, workers: int) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--mode", choices=["pilot", "full", "addon", "dev5b"], required=True)
+    ap.add_argument("--mode", choices=["pilot", "full", "addon", "dev5b", "dev5c"], required=True)
     ap.add_argument("--workers", type=int, default=7)
     a = ap.parse_args()
     return run_guarded(

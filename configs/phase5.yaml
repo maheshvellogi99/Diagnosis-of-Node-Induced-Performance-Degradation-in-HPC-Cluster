@@ -20,6 +20,7 @@ evalue:                                  # §3 as amended by D87
   edges: [0, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1]
   bet_pools: 2000                        # g_{a,h} is built over independent pools (D87)
   pool_seed: 7001                        # the fixed healthy pool of each probe (D88)
+  probe_J: 0.01                          # D109 restart mixture over investigations (Layer 2 J)
 
 policy:                                  # §4, D86, D89, D90
   s_grid: [1.1, 1.2, 1.3, 1.5, 2.0, 3.0]
@@ -87,3 +88,12 @@ grid5b:                                  # Phase 5b development grid (D95-D98, D
   misspec_variants: [misspec]
   misspec_budgets: [300, 7200]
   real_budgets: [300, 7200]
+
+grid5c:                                  # Phase 5c development evaluation (D109-D111); seeds 0-19 only
+  budgets: [0, 300, 1800, 7200]
+  validity_kinds: ["null", user_decoy, user_decoy_heavy, system_shock]
+  misspec_variants: [misspec]
+  misspec_budgets: [300, 7200]
+  repro_budget: 7200                     # old formula re-run on K 1%, s 1.3 and nulls; must match dev5b
+  stress_k_pre: [10, 25]                 # D110 debt stress test, K 1%, s 1.3, B 7200, old vs D109
+  stress_budget: 7200
