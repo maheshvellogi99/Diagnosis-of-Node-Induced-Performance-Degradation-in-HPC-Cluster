@@ -715,7 +715,8 @@ budget B = 7200.
 
 **Gate 5F.** (i) Validity: null, decoy and shock P(ever) ≤ α + 2 SE at every B, fixed pool and pool
 per base reported side by side (D100). (ii) KM P(flag ≤ 14 d) ≥ 0.8 at K = 1%, s = 1.3, B = 7200.
-(iii) Top-1 diagnosis accuracy ≥ 0.9 among flagged degraded nodes at B = 7200. No change after the run.
+(iii) Top-1 diagnosis accuracy ≥ 0.9 among flagged degraded nodes at B = 7200. No change after the run. Before anything runs, Phase 5F calls the D112 freeze guard
+(`scripts/check_frozen.py`) and stops if it fails.
 
 ---
 
@@ -728,6 +729,12 @@ estimate P(o | h, a); end-to-end run: submit benchmark jobs, inject at random ti
 time-to-flag, diagnosis accuracy and node-seconds spent vs a fixed battery.
 
 **Gate 6.** End-to-end run completes; every number traced to logs; admin sign-off recorded.
+
+**Phase 6-prep (D112–D115, 14 Nov 2026).** No approved machine yet, and the development Mac is
+arm64 (HPAS membw needs x86-64), so only the machine-independent parts are done: the freeze guard
+(D112), the measurement-substitution rule and its plumbing (D113), the tiered protocol
+docs/PHASE6_PROTOCOL.md with Gate 6 (D114, which supersedes the provisional text above), and the
+measurement kit in cluster/ (D115). Report: reports/phase_6prep.md.
 
 ---
 
@@ -952,3 +959,7 @@ only with full three-layer results. Decide with the guide after Gate 4b.
 | D109 | 13 Nov 2026 | Probe evidence is a restart mixture over investigations (P1 of reports/phase_5b.md §10.3), decided before any result: P_n = Σ_{k ≤ N} w_k Π_{i = k..N} F_i + (1 − J)^N, w_k = J (1 − J)^(k−1), J = 0.01; recursion A ← F (A + J R), R ← (1 − J) R; log E_n = log M_n + log P_n. Validity proof in §9 Phase 5, 5.3. The old formula (probe factors on every jumper state, PHASE5_DESIGN §3) was the architect's design error; it is J = 1 and kept as a reference row. Tests: P(0) = 1, one-step fairness, recursion = explicit sum, J = 1 = old formula | Mahesh |
 | D110 | 13 Nov 2026 | Development evaluation of the primary (Rn(1) + IG-only + D95 + D96 + D98 + D109), old formula as reference: B ∈ {0, 300, 1800, 7200}, K ∈ {1, 2, 5}%, all s; validity (nulls 0–199, decoy, heavy, shock; fixed pool and pool per base); misspecified rows at B = 300 and 7200. Debt stress test (diagnostic, not a gate): k_pre ∈ {0, 10, 25} extra healthy investigations of each degraded node before onset, old formula vs D109, F(14 d) at K = 1%, s = 1.3, B = 7200 | Mahesh |
 | D111 | 13 Nov 2026 | Freeze rule fixed before results: if every validity row passes α + 2 SE, tag the primary as git tag v1.0-dev-frozen and write docs/FROZEN_CONFIG.md (every parameter, config hash, commit); if any validity row fails, STOP, no tag | Mahesh |
+| D112 | 14 Nov 2026 | Freeze guard: scripts/check_frozen.py exits non-zero unless (a) tag v1.0-dev-frozen exists, (b) the SHA-256 of every file listed in docs/FROZEN_CONFIG.md matches, or every difference is a D113 field, (c) the policy to be run is ig_d109 with probe_J = 0.01 (Policy's default probe_J = 1.0 is a trap the guard must catch). Phase 5F calls this guard before anything runs. Tests | Mahesh |
+| D113 | 14 Nov 2026 | Measurement-substitution rule, pre-registered before any real measurement. Phase 6 may replace ONLY measured inputs: probes.k, probes.sigma (may become one σ per probe), probes.cost_s, probes.mem_fixed_shift, the healthy pool (an empirical pool of measured runs replaces the Gaussian pool), telemetry.counts. Everything else stays frozen: bin edges, β, bet_s0, s_grid, J, π0(h0), τ, exclude_days, the policy, Layers 1 and 2. Result tagged v1.1-measured. Plumbing (per-probe σ, empirical-pool option) implemented now; with scalar σ and the Gaussian pool, dev5c runs (K 1%, s 1.3, B 7200, seeds 0–4, 20 nulls) must reproduce bit for bit, else STOP | Mahesh |
+| D114 | 14 Nov 2026 | docs/PHASE6_PROTOCOL.md, hardware-agnostic, three tiers: A institute cluster with written admin approval (PROMPT 6); B 2–4 identical dedicated x86-64 Linux machines we control, no one else's jobs; C no hardware: Phase 5F on the design tables and the paper states Layer 3 is simulation-only. For A/B: ≥ 1000 healthy runs per probe type over ≥ 3 days and ≥ 2 machines; {cpuoccupy, cachecopy, membw, memleak} × 2 intensities × ≥ 10 reps × all probes, randomised order; tables fitted on the first 2/3 of campaign days, checked on the last 1/3; s per anomaly × intensity from a fixed single-node benchmark with and without the anomaly (multi-node MPI straggler check only with ≥ 2 machines). Wall-clock hours per tier from probe costs. Safety rules copied verbatim. Gate 6 defined now (σ per probe with CI, held-out diagnosis accuracy, s vs the Phase 3 range): reported numbers, no tuning on them | Mahesh |
+| D115 | 14 Nov 2026 | Measurement kit in cluster/ with its own README: probes (cpu fixed-work timing, mbw = STREAM, cache pointer-chase, mem from /proc/meminfo, tel = /proc/stat, /proc/meminfo, /proc/vmstat snapshots); a harness logging JSONL with start/stop timestamps, a watchdog and hard end time for every anomaly, memleak capped below 25% of node memory, refusing any anomaly unless the host is x86-64 Linux AND its hostname is in cluster/approved_hosts.txt (empty in git). HPAS is cloned on the target machine only, at a pinned commit, by a documented script; not cloned now. Analysis script: campaign logs → D113 inputs, tested on synthetic logs. On the development Mac (arm64): unit tests and --dry-run only; never run an HPAS anomaly or stress program on it. No Phase 6 hardware work until docs/admin_approval.md (tier A) or a tier-B machine list exists | Mahesh |
