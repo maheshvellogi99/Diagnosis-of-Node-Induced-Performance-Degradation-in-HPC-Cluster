@@ -15,6 +15,7 @@ import argparse
 import json
 import subprocess
 
+import numpy as np
 from phase5_tables import diag_row, km_ci, load, pick, speed_row, validity_row
 
 from hpcdiag.utils.run import PROJECT_ROOT, resolve
@@ -293,11 +294,18 @@ def main() -> None:
         ],
     )
 
+    cells = [(K, s) for K in (1, 2, 5) for s in S if s >= 1.2]
+    lose300 = sum(F("new", 300, K, s)["km_F14"] < F("old", 300, K, s)["km_F14"] for K, s in cells)
+    win1800 = sum(F("new", 1800, K, s)["km_F14"] > F("old", 1800, K, s)["km_F14"] for K, s in cells)
+    win7200 = sum(
+        F("new", 7200, K, s)["km_F14"] >= F("old", 7200, K, s)["km_F14"] for K, s in cells
+    )
+    lj = float(np.log(1 / 0.01))
     s11 = {B: F("new", B, 1, 1.1) for B in (0, 300, 1800, 7200)}
     o11 = {B: F("old", B, 1, 1.1) for B in (300, 1800, 7200)}
     commit = git("rev-parse", "--short", "HEAD")
     freeze_txt = (
-        f"**Every one of the {n_new_rows} D109 validity rows passes α + 2 SE, so the D111 freeze rule says FREEZE:** the primary is tagged `v1.0-dev-frozen`, and every parameter is listed in docs/FROZEN_CONFIG.md."
+        f"**Every one of the {n_new_rows} D109 validity rows (each over four scenario kinds, and two pools where B > 0) passes α + 2 SE, so the D111 freeze rule says FREEZE:** the primary is tagged `v1.0-dev-frozen`, and every parameter is listed in docs/FROZEN_CONFIG.md."
         if freeze
         else "**At least one D109 validity row fails α + 2 SE, so the D111 freeze rule says STOP:** no tag."
     )
@@ -318,6 +326,12 @@ Nothing ran on seeds 20–39 or nulls 200–399: the runner reads `index.parquet
   {F("old", 300)["km_F14"]:.3f} / {F("old", 1800)["km_F14"]:.3f} / {F("old", 7200)["km_F14"]:.3f} with the old formula (§4).
 - **Debt stress test (§6):** with 25 extra healthy investigations before onset, F(14 d) at s = 1.3, B = 7200 is {srows[2][3]} with D109,
   against {srows[2][1]} with the old formula.
+- **Trade-off: D109 is slower at the smallest budget.** At B = 300, F(14 d) is lower with D109 in {lose300} of {len(cells)} (K, s) cells
+  with s ≥ 1.2 (K = 1%, s = 1.3: {F("new", 300)["km_F14"]:.3f} against {F("old", 300)["km_F14"]:.3f}). At B = 1800 it is higher in {win1800} of {len(cells)},
+  and at B = 7200 higher or equal in {win7200} of {len(cells)}. A formula property, not measured separately, is a likely cause: after a node's first
+  investigation, P = J F_1 + (1 − J), so a strong first investigation counts about log(1/J) = {lj:.1f} nats less than under
+  the old formula. At B = 300 a node gets few investigations, so that cost is not recovered. J = 0.01 was fixed before
+  any result (D109) and was not tuned.
 
 {gates}
 
