@@ -200,9 +200,12 @@ Step 0 - safety check, before any code runs on the cluster
 Step 1 - build HPAS (github.com/peaclab/HPAS, record commit hash) and the probes (a_cpu, a_mbw = STREAM, a_cache, a_mem,
 a_tel capture) in a separate folder cluster/ with its own README. No network calls except the documented git clone.
 
+[SUPERSEDED by D118 / docs/PHASE6_PROTOCOL.md §4: bin edges stay frozen (D113); >= 1000 fit-day and >= 300
+ test-day healthy runs per probe type (D119a). Kept below as originally written.]
 Step 2 - healthy baselines: each probe >= 30 runs per node over >= 3 different days. Fix outcome bin edges from these
 quantiles and COMMIT them before any anomaly run (pre-registration).
 
+[SUPERSEDED by D118 / docs/PHASE6_PROTOCOL.md §4.2-4.5 and §5. Kept below as originally written.]
 Step 3 - injection campaign: {cpuoccupy, cachecopy, membw, memleak} x 2 intensities x >= 10 repetitions x all probes,
 randomised order, start/stop timestamps logged. Time split: tables estimated on the first 2/3 of campaign days, engine
 evaluated on the last 1/3.

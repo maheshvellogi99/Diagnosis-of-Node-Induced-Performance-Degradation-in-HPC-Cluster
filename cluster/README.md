@@ -20,7 +20,8 @@ The kit enforces them in code (`kit_safety.py`, `kit_harness.py`). An anomaly is
 one of these holds:
 - The host is **x86-64 Linux**.
 - The **hostname is listed in `approved_hosts.txt`**. That file is **empty in git**; add a host only
-  after the written approval (tier A, `docs/admin_approval.md`) or the tier-B machine list exists.
+  after the written approval (tier A, `docs/admin_approval.md`) or a filled `docs/tierB_machines.md`
+  (tier B) exists.
 - The anomaly is one of **cpuoccupy, cachecopy, membw, memleak**. iometadata, iobandwidth and
   netoccupy are always refused.
 - Its command has **no `UNKNOWN` placeholder**.
@@ -30,7 +31,9 @@ one of these holds:
 Each anomaly runs in its own process group. A watchdog kills the group at its **hard end time**
 (`anomaly_duration_s + grace_s`). For memleak, it also kills the group when the group's resident memory
 passes the cap. The harness refuses the whole session, even healthy probes, on a host that is not
-approved.
+approved, or when the plan in `campaign.json` cannot give ≥ 1000 fit-day and ≥ 300 test-day healthy
+runs per probe on ≥ 2 machines over ≥ 3 days (D119a, `kit_safety.check_campaign_size`). The shipped
+plan is 2 machines × 3 days × 250 batteries per day.
 
 ## Files
 
@@ -62,6 +65,10 @@ approved.
    - **Probe work sizes.** Calibrate them so that a healthy run takes about `configs/phase5.yaml`
      `probes.cost_s`.
    - **Benchmark command.** Choose the fixed single-node benchmark.
+   - **Campaign size.** Set `planned_machines`, `planned_days` and `healthy_batteries_per_day`
+     (minimum: `kit_safety.min_batteries_per_day`).
+   - **STREAM output (D120).** Run `bin/stream` once, check that `kit_probes.parse_stream_triad` reads
+     its `Triad:` line correctly, and commit that output as a test fixture.
 4. Dry run: `python3 cluster/kit_harness.py --config cluster/campaign.json --plan plan.json --dry-run`.
 5. Generate the plans with `kit_campaign.py` (seed = day × 100 + machine), then run them with `--log`.
    The schedule and run counts are in `docs/PHASE6_PROTOCOL.md`.
