@@ -38,8 +38,8 @@ def test_parse_hashes():
         ("probes.cost_s.mem", True),
         ("probes.mem_fixed_shift", True),
         ("probes.healthy_pool", True),
-        ("telemetry.counts", True),
-        ("telemetry.crossblock_counts", False),
+        ("telemetry.counts", False),  # D117: no longer a D113 field
+        ("telemetry.crossblock_counts", True),  # D117
         ("probes.names", False),
         ("evalue.edges", False),
         ("evalue.beta", False),
@@ -196,3 +196,51 @@ def test_cli_exit_codes():
     )  # fmt: skip
     assert run("ig_d109").returncode == 0
     assert run("ig").returncode != 0
+
+
+# ------------------------------------------------- D116: src/ changes only in the plumbing paths
+
+
+@pytest.mark.parametrize(
+    "path, ok",
+    [
+        ("src/hpcdiag/layer3/setup.py", True),
+        ("src/hpcdiag/layer3/new_module.py", True),
+        ("src/hpcdiag/freeze.py", True),
+        ("src/hpcdiag/phase6/analysis.py", True),
+        ("src/hpcdiag/layer1/run_conformal.py", False),
+        ("src/hpcdiag/layer2/accumulate.py", False),
+        ("src/hpcdiag/stats/restart.py", False),
+        ("src/hpcdiag/utils/run.py", False),
+        ("src/hpcdiag/freeze_extra.py", False),
+        ("src/hpcdiag/phase6x/a.py", False),
+    ],
+)
+def test_src_paths(path, ok):
+    assert (FZ.disallowed_src([path]) == []) is ok
+
+
+def test_src_changes_in_temp_repo(tmp_path):
+    def w(rel, text):
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+
+    _git(tmp_path, "init", "-q")
+    w("src/hpcdiag/layer1/a.py", "x = 1\n")
+    w("src/hpcdiag/layer3/b.py", "y = 1\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "a")
+    _git(tmp_path, "tag", "v1.0-dev-frozen")
+    assert FZ.src_changes("v1.0-dev-frozen", tmp_path) == []
+    w("src/hpcdiag/layer3/b.py", "y = 2\n")  # allowed, uncommitted
+    assert FZ.disallowed_src(FZ.src_changes("v1.0-dev-frozen", tmp_path)) == []
+    w("src/hpcdiag/layer1/a.py", "x = 2\n")  # frozen code, uncommitted
+    assert FZ.disallowed_src(FZ.src_changes("v1.0-dev-frozen", tmp_path)) == [
+        "src/hpcdiag/layer1/a.py"
+    ]
+    _git(tmp_path, "checkout", "-q", "--", "src/hpcdiag/layer1/a.py")
+    w("src/hpcdiag/layer2/new.py", "z = 1\n")  # untracked new file outside the plumbing paths
+    assert FZ.disallowed_src(FZ.src_changes("v1.0-dev-frozen", tmp_path)) == [
+        "src/hpcdiag/layer2/new.py"
+    ]

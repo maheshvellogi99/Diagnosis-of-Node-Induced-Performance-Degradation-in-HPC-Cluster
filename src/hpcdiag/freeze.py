@@ -5,6 +5,8 @@ Checks, all of which must pass:
   (b) every file listed in docs/FROZEN_CONFIG.md (read from the TAG, not the working tree, and the
       working-tree copy must equal it) has the listed SHA-256, or, for configs/phase5.yaml only,
       every difference from the tagged file is a D113 field;
+  (d) src/ differs from the tag only in src/hpcdiag/layer3/, src/hpcdiag/freeze.py and
+      src/hpcdiag/phase6/ (D116; working tree, committed or not, and untracked files);
   (c) the policy to be run is ig_d109 with probe_J = 0.01 exactly, built as the runner builds it
       (Policy's default probe_J = 1.0 is the old formula; a hand-built Policy is caught too).
 """
@@ -33,8 +35,10 @@ D113_FIELDS = (
     "probes.cost_s",
     "probes.mem_fixed_shift",
     "probes.healthy_pool",
-    "telemetry.counts",
+    "telemetry.crossblock_counts",  # D117: the matrix the primary reads (was telemetry.counts)
 )
+# D116: src/ may differ from the tag only here (D113 plumbing, the guard, the Phase 6 analysis)
+ALLOWED_SRC = ("src/hpcdiag/layer3/", "src/hpcdiag/freeze.py", "src/hpcdiag/phase6/")
 FROZEN_POLICY = "ig_d109"
 FROZEN_J = 0.01
 FROZEN_FIELDS = {"nodes": "rank", "probes": "ig_cost", "exclusion": "cleared_skipdone"}
@@ -124,6 +128,27 @@ def _git(repo, *args) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=repo, capture_output=True)
 
 
+def disallowed_src(paths) -> list[str]:
+    """Paths under src/ that are outside the D116 allowed list."""
+    return sorted(
+        p
+        for p in paths
+        if not any(p == a or (a.endswith("/") and p.startswith(a)) for a in ALLOWED_SRC)
+    )
+
+
+def src_changes(tag: str, repo=PROJECT_ROOT) -> list[str]:
+    """Files under src/ that differ between the tag and the working tree (committed or not),
+    plus untracked files under src/ (ignored files such as __pycache__ excluded)."""
+    changed = _git(repo, "diff", "--name-only", tag, "--", "src/").stdout.decode().split()
+    new = (
+        _git(repo, "ls-files", "--others", "--exclude-standard", "--", "src/")
+        .stdout.decode()
+        .split()
+    )
+    return sorted(set(changed) | set(new))
+
+
 def tag_exists(tag: str, repo=PROJECT_ROOT) -> bool:
     return _git(repo, "rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode == 0
 
@@ -154,6 +179,8 @@ def run_guard(policy: str, config_path: str, repo=PROJECT_ROOT) -> tuple[bool, l
     problems, notes = check_files(hashes, Path(repo), lambda p: at_tag(p, TAG, repo))
     msgs += [f"FAIL (b): {p}" for p in problems] + [f"note (b): {n}" for n in notes]
     msgs += [f"FAIL (c): {p}" for p in check_policy(policy, load_config(config_path))]
+    bad_src = disallowed_src(src_changes(TAG, repo))
+    msgs += [f"FAIL (d): {p} changed since {TAG}, outside {ALLOWED_SRC} (D116)" for p in bad_src]
     ok = not any(m.startswith("FAIL") for m in msgs)
     msgs.append(
         f"{'PASS' if ok else 'FAIL'}: {len(hashes)} frozen files checked, policy {policy!r}"
