@@ -1,9 +1,11 @@
-"""Probing policy on a fixed Layer-2 trajectory (docs/PHASE5_DESIGN.md §3-§5, D86-D91).
+"""Probing policy on a fixed Layer-2 trajectory (docs/PHASE5_DESIGN.md §3-§5, D86-D91, D109).
 
-Multiplying every jumper state by f leaves the state proportions unchanged and the jumper update is
-linear homogeneous, so log E_n(t) = log M_n(t) + sum of log f over probes finished by t. Layer 2 is
-computed once; a policy only adds a running log-probe vector. Probes launched after evaluation t
-finish inside the next block, so they count at t + 1.
+log E_n(t) = log M_n(t) + log P_n(t). P_n is the D109 restart mixture over node n's investigations
+(PLAN 5.3, hpcdiag.stats.restart) with J = Policy.probe_J. probe_J = 1 is the old formula
+(PHASE5_DESIGN §3: every probe factor on every jumper state, so log P = sum of log f), kept as the
+default so the Phase 5/5b task lists mean what they meant. Layer 2 is computed once; a policy only
+adds a running log-probe vector. Probes launched after evaluation t finish inside the next block, so
+they count at t + 1.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from hpcdiag.layer3 import evalue as EV
 from hpcdiag.layer3.evalue import Bets, conformal_p
 from hpcdiag.layer3.probes import CAUSES, HYPOTHESES
 from hpcdiag.stats.ebh import ebh_log
+from hpcdiag.stats.restart import restart_init, restart_logP, restart_step
 
 BLOCKS_PER_DAY = 4
 
@@ -28,6 +31,7 @@ class Policy:
     nodes: str = "rank"  # rank | random | sweep
     probes: str = "ig_cost"  # ig_cost | ig_unit | random | battery | stage (D97)
     exclusion: str = "cleared_skipdone"  # cleared_skipdone (D95) | cleared (D86) | all | none
+    probe_J: float = 1.0  # D109 restart weight; 1.0 = old formula (sum of log f)
 
 
 @dataclass
@@ -193,14 +197,24 @@ def run_policy(
     m: int,
     exclude_blocks: int,
     log_growth: bool = False,
+    pre: dict[int, int] | None = None,
 ) -> tuple[np.ndarray, list[dict]]:
     """Returns log E (n_evals, n_nodes) and the list of investigations with probes run.
-    log_growth: record, per probe on a healthy node, the fixed-pool healthy growth of its bet."""
+    log_growth: record, per probe on a healthy node, the fixed-pool healthy growth of its bet.
+    pre: {node: k} runs k extra investigations of a healthy node before the first evaluation (D110
+    debt stress test); they enter the evidence but not the budget or the returned list."""
     T, n_nodes = logM.shape
     logE = logM.copy()
+    logA, logR = restart_init(n_nodes)
+    for n, k in (pre or {}).items():
+        if wld.onset_idx[n] <= 0:
+            raise ValueError("pre-onset investigations need onset after the first evaluation")
+        for _ in range(k):
+            r = investigate(n, -1, np.inf, bel, wld, pol, rng)
+            logA[n], logR[n] = restart_step(logA[n], logR[n], r["dlog"], pol.probe_J)
+    lp = restart_logP(logA, logR)
     if pol.B <= 0:
-        return logE, []
-    lp = np.zeros(n_nodes)
+        return logE + lp, []
     until = np.full(n_nodes, -1)
     done = np.zeros(n_nodes, bool)  # latest investigation ended with a cause at max pi >= tau
     per_block = pol.B / BLOCKS_PER_DAY
@@ -229,7 +243,8 @@ def run_policy(
             budget -= r["seconds"]
             if r["seconds"] > 0:
                 out.append(r)
-                lp[n] += r["dlog"]
+                logA[n], logR[n] = restart_step(logA[n], logR[n], r["dlog"], pol.probe_J)
+                lp[n] = restart_logP(logA[n], logR[n])
                 cleared = r["pi_h0"] >= bel.tau
                 done[n] = (not cleared) and r["pi_max"] >= bel.tau
                 if (cleared and pol.exclusion != "none") or pol.exclusion == "all":

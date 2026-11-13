@@ -727,3 +727,71 @@ def test_default_telemetry_is_crossblock():
     bel = ST.make_belief(cfg, ST.VARIANTS["main"])
     assert (bel.conf == ST.telemetry_rows(cfg, "crossblock")).all()
     assert bel.bets.per_state
+
+
+# ------------------------------------------------------------- D109 restart mixture in the policy
+
+
+def _old_formula(logM, inv):
+    """Old formula (PHASE5_DESIGN §3): log E[t] = log M[t] + sum of dlog over investigations
+    finished before evaluation t, accumulated in time order (as the Phase 5/5b code did)."""
+    lp = np.zeros(logM.shape[1])
+    out = logM.copy()
+    k = 0
+    for t in range(logM.shape[0]):
+        while k < len(inv) and inv[k]["t"] < t:
+            lp[inv[k]["node"]] += inv[k]["dlog"]
+            k += 1
+        out[t] = logM[t] + lp
+    return out
+
+
+def test_policy_J_one_reproduces_old_formula_exactly(model, bets):
+    bel, wld = make_belief(model, bets), make_world(model, cause=[1, 0, 0, 0, 0, 0], s=1.3)
+    logM = np.random.default_rng(0).normal(0, 2, (60, 6))
+    pol = SIM.Policy("p", 7200, probe_J=1.0)
+    logE, inv = SIM.run_policy(logM, bel, wld, pol, np.random.default_rng(1), 0.1, 6, 28)
+    assert len(inv) > 10
+    assert np.array_equal(logE, _old_formula(logM, inv))
+
+
+def test_policy_default_is_old_formula(model, bets):
+    assert SIM.Policy("p", 300).probe_J == 1.0
+
+
+def test_policy_restart_matches_recursion(model, bets):
+    from hpcdiag.stats.restart import restart_logP_seq
+
+    bel, wld = make_belief(model, bets), make_world(model, cause=[1, 0, 0, 0, 0, 0], s=1.3)
+    logM = np.random.default_rng(0).normal(0, 2, (60, 6))
+    pol = SIM.Policy("p", 7200, probe_J=0.01)
+    logE, inv = SIM.run_policy(logM, bel, wld, pol, np.random.default_rng(1), 0.1, 6, 28)
+    T = logM.shape[0]
+    for n in range(6):
+        mine = [r for r in inv if r["node"] == n]
+        if not mine:
+            assert np.array_equal(logE[:, n], logM[:, n])
+            continue
+        lp = restart_logP_seq(np.array([r["dlog"] for r in mine]), 0.01)
+        ref = np.zeros(T)
+        for r, v in zip(mine, lp, strict=True):
+            ref[r["t"] + 1 :] = v
+        assert np.allclose(logE[:, n] - logM[:, n], ref, atol=1e-12)
+
+
+def test_pre_onset_investigations(model, bets):
+    """D110 stress: k_pre extra healthy investigations at t = 0 enter the evidence but not the
+    budget or the investigation list."""
+    bel = make_belief(model, bets)
+    wld = make_world(model, cause=[1, 0, 0, 0, 0, 0], onset=[30, 10**9, 9, 9, 9, 9], s=1.3)
+    logM = np.zeros((10, 6))
+    pol0 = SIM.Policy("p", 0, probe_J=1.0)
+    logE, inv = SIM.run_policy(
+        logM, bel, wld, pol0, np.random.default_rng(1), 0.1, 6, 28, pre={0: 10}
+    )
+    assert inv == []
+    assert logE[0, 0] < -5 and (logE[:, 1:] == 0).all()  # healthy probes: debt on node 0 only
+    assert (logE[:, 0] == logE[0, 0]).all()
+    with pytest.raises(ValueError):
+        SIM.run_policy(logM, bel, make_world(model, cause=[1, 0, 0, 0, 0, 0], onset=[0] * 6),
+                       pol0, np.random.default_rng(1), 0.1, 6, 28, pre={0: 1})  # fmt: skip
