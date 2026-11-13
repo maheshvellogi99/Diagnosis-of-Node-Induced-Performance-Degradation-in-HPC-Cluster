@@ -63,6 +63,15 @@ class World:
     onset_idx: np.ndarray  # first evaluation index at or after onset; large = never
     pool_key: int = 0  # identifies the pools
     healthy_bins: np.ndarray | None = None  # true healthy P(bin) on these pools, lazily set
+    noise: list | None = None  # D119: test-day healthy log x per probe; None = Gaussian outcomes
+
+    def draw(self, state: int, a: int, rng: np.random.Generator) -> float:
+        """Outcome log x of probe a in this state. Gaussian: the Phase 5 call, unchanged. Measured
+        tables (D119): the state's model mean plus a resampled test-day healthy log x."""
+        if self.noise is None:
+            return float(rng.normal(self.means[state, a], sig(self.sigma, a)))
+        v = self.noise[a]
+        return float(self.means[state, a] + v[rng.integers(len(v))])
 
 
 def gain_order(pi: np.ndarray, unused: list[int], bel: Belief, by_cost: bool) -> int:
@@ -98,6 +107,13 @@ def expected_log_f(pi: np.ndarray, a: int, bel: Belief) -> float:
 def fixed_pool_healthy_growth(a: int, w: np.ndarray, bel: Belief, wld: World) -> float:
     """Exact mean log f of the bet in use for a healthy run scored against this world's pool, under
     the true healthy model (D102 ii). Reported only; never used by the policy."""
+    if wld.healthy_bins is None and wld.noise is not None:  # D119: exact for empirical outcomes
+        rows = []
+        for pool, v in zip(wld.pools, wld.noise, strict=True):
+            n = len(pool)
+            r = n - np.searchsorted(pool, v, side="right")  # p uniform on [r, r+1)/(n+1)
+            rows.append(EV.bin_overlap(n, bel.bets.edges)[r].mean(axis=0))
+        wld.healthy_bins = np.stack(rows)
     if wld.healthy_bins is None:
         wld.healthy_bins = np.stack(
             [
@@ -159,7 +175,7 @@ def investigate(
         seq.append(a)
         unused.remove(a)
         if a < na:
-            y = float(rng.normal(wld.means[state, a], sig(wld.sigma, a)))
+            y = wld.draw(state, a, rng)
             p = float(conformal_p(np.array([y]), wld.pools[a], rng.uniform(size=1))[0])
             w = bel.bets.weights(pi, bel.hyp)  # before this probe's update
             g = bel.bets.mixture(a, w)

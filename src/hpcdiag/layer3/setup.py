@@ -29,6 +29,7 @@ class Variant:
     tel_belief: str = "crossblock"  # crossblock (D98) | oof | design: matrix the posterior uses
     tel_world: str = "crossblock"  # matrix outcomes are drawn from
     bets: str = "state"  # state: over (cause, s0) (D96) | cause13: per cause at s0 = 1.3 (D87)
+    cross_machine: bool = False  # D119: pool from one host's fit runs, outcomes from another's
 
 
 VARIANTS = {
@@ -44,6 +45,7 @@ VARIANTS = {
     "tel_design": Variant("tel_design", tel_belief="design", tel_world="design"),
     "tel_transfer": Variant("tel_transfer", tel_belief="oof", tel_world="crossblock"),
     "bets_cause13": Variant("bets_cause13", bets="cause13"),
+    "cross_machine": Variant("cross_machine", cross_machine=True),  # measured tables only (D119)
 }
 
 
@@ -63,11 +65,23 @@ def fixed_pools(names, sigma, n_pool: int, seed_key: list[int]) -> list[np.ndarr
     return [np.sort(rng.normal(0, PR.sig(sigma, i), n_pool)) for i in range(len(names))]
 
 
+def read_measured(path: str) -> pd.DataFrame:
+    """Measured healthy runs; floats parsed exactly (round_trip): values read back bit for bit."""
+    return pd.read_csv(resolve(path), float_precision="round_trip")
+
+
+def is_measured_tables(df: pd.DataFrame) -> bool:
+    """D119: a CSV with a split column holding test rows also defines the outcome draws."""
+    return "split" in df.columns and bool((df["split"] == "test").any())
+
+
 def empirical_pools(path: str, names, n_pool: int) -> list[np.ndarray]:
-    """D113: measured healthy pool. CSV with columns probe, log_x, t_start; per probe the FIRST
-    n_pool runs in time order (time order is sacred), sorted. Too few runs or a missing probe:
-    error. Floats are parsed exactly (round_trip), so a written pool reads back bit for bit."""
-    df = pd.read_csv(resolve(path), float_precision="round_trip")
+    """D113/D119: measured healthy pool. CSV with columns probe, log_x, t_start (and optionally
+    host, split); per probe the FIRST n_pool runs in time order (time order is sacred) among the
+    fit rows if a split column exists, sorted. Too few runs or a missing probe: error."""
+    df = read_measured(path)
+    if "split" in df.columns:
+        df = df[df["split"] == "fit"]
     out = []
     for a in names:
         d = df[df["probe"] == a].sort_values("t_start", kind="stable")
@@ -76,6 +90,29 @@ def empirical_pools(path: str, names, n_pool: int) -> list[np.ndarray]:
                 f"empirical pool {path}: probe {a} has {len(d)} runs, n_pool is {n_pool}"
             )
         out.append(np.sort(d["log_x"].to_numpy(float)[:n_pool]))
+    return out
+
+
+def resampled_pools(fit: pd.DataFrame, names, n_pool: int, seed_key: list[int]) -> list[np.ndarray]:
+    """D119: n_pool fit-day runs per probe drawn with replacement (time order fixes the sample)."""
+    rng = np.random.default_rng(seed_key)
+    out = []
+    for a in names:
+        v = fit[fit["probe"] == a].sort_values("t_start", kind="stable")["log_x"].to_numpy(float)
+        if len(v) == 0:
+            raise ValueError(f"no fit-day runs for probe {a}")
+        out.append(np.sort(rng.choice(v, n_pool, replace=True)))
+    return out
+
+
+def outcome_noise(test: pd.DataFrame, names) -> list[np.ndarray]:
+    """D119: test-day healthy log x per probe, in time order; outcome = model mean + a draw."""
+    out = []
+    for a in names:
+        v = test[test["probe"] == a].sort_values("t_start", kind="stable")["log_x"].to_numpy(float)
+        if len(v) == 0:
+            raise ValueError(f"no test-day runs for probe {a}")
+        out.append(v)
     return out
 
 
@@ -142,12 +179,35 @@ def make_world(
     elif v.misspec:
         key = [ec["pool_seed"], n_pool, 1]
     means = np.array([[m.delta(h, a, s) for a in m.names] for h in PR.HYPOTHESES])
+    noise = None
     if pc.get("healthy_pool"):  # D113: measured pool replaces the Gaussian pool
-        if v.redraw_pool or v.misspec:
-            raise ValueError(
-                "pool per base and misspecified rows are not defined for a measured pool"
-            )
-        pools = empirical_pools(pc["healthy_pool"], m.names, n_pool)
+        df = read_measured(pc["healthy_pool"])
+        if v.misspec:
+            raise ValueError("the misspecified row is not run with measured tables (D119)")
+        if not is_measured_tables(df):  # pool only, Gaussian outcomes (D113)
+            if v.redraw_pool or v.cross_machine:
+                raise ValueError(
+                    "pool per base / cross-machine need measured tables (split column)"
+                )
+            pools = empirical_pools(pc["healthy_pool"], m.names, n_pool)
+        else:  # D119: outcomes = model mean + resampled test-day healthy log x
+            fit, test = df[df["split"] == "fit"], df[df["split"] == "test"]
+            if v.cross_machine:
+                hosts = sorted(set(fit["host"]) & set(test["host"]))
+                if len(hosts) < 2:
+                    raise ValueError("cross-machine row needs fit and test runs from >= 2 hosts")
+                pools = resampled_pools(
+                    fit[fit["host"] == hosts[0]], m.names, n_pool, [ec["pool_seed"], n_pool, 2]
+                )
+                noise = outcome_noise(test[test["host"] == hosts[1]], m.names)
+            else:
+                if v.redraw_pool:
+                    pools = resampled_pools(fit, m.names, n_pool, key)
+                else:
+                    pools = empirical_pools(pc["healthy_pool"], m.names, n_pool)
+                noise = outcome_noise(test, m.names)
+    elif v.cross_machine:
+        raise ValueError("the cross-machine row needs measured tables (D119)")
     else:
         pools = fixed_pools(m.names, sigma, n_pool, key)
     return World(
@@ -158,4 +218,5 @@ def make_world(
         cause=cause,
         onset_idx=onset_idx,
         pool_key=hash(tuple(key)) if not v.misspec else hash((*key, sigma)),
+        noise=noise,
     )
