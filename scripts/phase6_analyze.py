@@ -28,10 +28,11 @@ def analyse(cfg: dict, logs: list[str], out: Path) -> dict:
     ho = AN.held_out(df, ft, m, pc["s_grid"], pc["pi0_h0"])
     sc = load_config("configs/phase3_inject.yaml")["kinds"]["node"]
     s_all = list(sc["s"]) + list(sc.get("s_extra", []))
-    g = AN.gate6(df, ft, ho, (min(s_all), max(s_all)))
+    tel = AN.telemetry(df, ft, cfg["antarex"]["rf"], int(cfg["seed"]))  # D117
+    g = AN.gate6(df, ft, ho, (min(s_all), max(s_all)), tel=tel)
     pool = out / "healthy_pool.csv"
     AN.write_pool(ft, pool)
-    d = AN.d113_inputs(ft, m, kept, str(pool))
+    d = AN.d113_inputs(ft, m, kept, str(pool), tel)
     (out / "d113_inputs.yaml").write_text(yaml.safe_dump(d, sort_keys=False))
     (out / "gate6.json").write_text(json.dumps(g, indent=1, default=str))
     return g

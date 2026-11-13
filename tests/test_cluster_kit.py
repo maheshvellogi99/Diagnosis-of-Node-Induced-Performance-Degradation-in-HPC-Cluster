@@ -143,6 +143,7 @@ def test_run_probe_with_injected_io():
     slept = []
     tel = KP.run_probe("tel", cfg, run_cmd, read, sleep=slept.append, clock=clock)
     assert tel["value"] is None and len(tel["snapshots"]) == 2 and slept == [60.0]
+    assert tel["snapshot_t"][1] > tel["snapshot_t"][0]
     assert tel["t_stop"] > tel["t_start"]
     assert calls[0] == ["cluster/bin/cpu_work", "10"]
 

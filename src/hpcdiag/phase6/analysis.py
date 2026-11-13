@@ -18,8 +18,13 @@ Procedure, fixed before any measurement (docs/PHASE6_PROTOCOL.md §5):
    over (cause, s) with the fitted tables (frozen s_grid, pi0_h0); top-1 hypothesis vs the true
    cause.
    Accuracy with a Wilson 95% interval; healthy test batteries: share called h0.
-telemetry.counts is not produced: no telemetry classifier is fixed for Phase 6 (UNKNOWN — needs a
-decision).
+9. Telemetry (D117): features = per-second rates of every numeric field between the two tel
+   snapshots (/proc/stat, /proc/meminfo, /proc/vmstat), over the fields present in every sample;
+   the D94 random forest (configs/phase5.yaml antarex.rf); classes h0, cpu, cache, mbw, mem.
+   Confusion matrix =
+   leave-one-fit-day-out, summed, fit days only. It replaces telemetry.crossblock_counts only if
+   every class has >= 30 fit-day samples; otherwise the frozen matrix stays and the measured one is
+   reported as secondary.
 """
 
 from __future__ import annotations
@@ -38,6 +43,89 @@ from hpcdiag.layer3 import probes as PR
 CAUSE_OF = {"cpuoccupy": "cpu", "cachecopy": "cache", "membw": "mbw", "memleak": "mem"}
 MEASURED = ("cpu", "mbw", "cache", "mem")  # probes with an x value; tel has none
 L_MIN = 0.01
+
+
+def parse_proc(kind: str, text: str) -> dict[str, float]:
+    """Numeric fields of one /proc snapshot: stat.<key>.<j>, meminfo.<Key>, vmstat.<key>."""
+    out: dict[str, float] = {}
+    for line in text.splitlines():
+        if kind == "meminfo":
+            if ":" not in line:
+                continue
+            k, v = line.split(":", 1)
+            parts = v.split()
+            if parts and _isnum(parts[0]):
+                out[f"meminfo.{k.strip()}"] = float(parts[0])
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        if kind == "vmstat":
+            if _isnum(parts[1]):
+                out[f"vmstat.{parts[0]}"] = float(parts[1])
+        else:
+            for j, x in enumerate(parts[1:]):
+                if _isnum(x):
+                    out[f"stat.{parts[0]}.{j}"] = float(x)
+    return out
+
+
+def _isnum(s: str) -> bool:
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
+def tel_features(snapshots: list[dict], dt: float) -> dict[str, float]:
+    """Per-second rate of every numeric field present in both snapshots (D117)."""
+    a, b = snapshots
+    out = {}
+    for kind in ("stat", "meminfo", "vmstat"):
+        pa, pb = parse_proc(kind, a.get(kind, "")), parse_proc(kind, b.get(kind, ""))
+        for k in pa.keys() & pb.keys():
+            out[k] = (pb[k] - pa[k]) / dt
+    return dict(sorted(out.items()))
+
+
+def telemetry(df: pd.DataFrame, ft: Fit, rf_cfg: dict, seed: int, min_per_class: int = 30) -> dict:
+    """D117 leave-one-fit-day-out confusion matrix of the telemetry classifier, fit days only."""
+    from sklearn.metrics import confusion_matrix
+
+    from hpcdiag.layer3.classifier import fit_predict
+
+    labels = list(PR.HYPOTHESES)
+    tel = df[(df["event"] == "probe") & (df["probe"] == "tel") & df["day"].isin(ft.fit_days)]
+    feats, y, day = [], [], []
+    for _, r in tel.iterrows():
+        st = r.get("snapshot_t")
+        dt = (st[1] - st[0]) if isinstance(st, list) else (r["t_stop"] - r["t_start"])
+        feats.append(tel_features(r["snapshots"], float(dt)))
+        y.append("h0" if r["condition"] == "healthy" else CAUSE_OF[r["anomaly"]])
+        day.append(r["day"])
+    names = sorted(set.intersection(*(set(f) for f in feats))) if feats else []
+    X = np.array([[f[k] for k in names] for f in feats], float)
+    y, day = np.array(y), np.array(day)
+    n = {c: int((y == c).sum()) for c in labels}
+    m = np.zeros((len(labels), len(labels)), int)
+    for d in ft.fit_days:
+        te = day == d
+        tr = ~te
+        if te.any() and tr.any():
+            pred = fit_predict(X, y, np.flatnonzero(tr), np.flatnonzero(te), rf_cfg, seed)
+            m += confusion_matrix(y[te], pred, labels=labels)
+    small = [c for c in labels if n[c] < min_per_class]
+    return {
+        "labels": labels,
+        "matrix": m.tolist(),
+        "n_per_class": n,
+        "features": names,
+        "replace": not small,
+        "reason": "every class has >= 30 fit-day samples"
+        if not small
+        else f"fewer than {min_per_class} fit-day samples for {small}: frozen matrix kept",
+    }
 
 
 def load_logs(paths) -> pd.DataFrame:
@@ -207,7 +295,12 @@ def held_out(df: pd.DataFrame, ft: Fit, m: PR.ProbeModel, s_grid, pi0_h0: float)
 
 
 def gate6(
-    df: pd.DataFrame, ft: Fit, ho: dict, s_range: tuple[float, float], reps_min: int = 10
+    df: pd.DataFrame,
+    ft: Fit,
+    ho: dict,
+    s_range: tuple[float, float],
+    reps_min: int = 10,
+    tel: dict | None = None,
 ) -> dict:
     hosts = sorted(df["host"].unique())
     reps = (
@@ -236,14 +329,14 @@ def gate6(
             "reps_per_anomaly_intensity_ge_10": bool(reps)
             and all(v >= reps_min for v in reps.values()),
         },
-        "telemetry_counts": (
-            "not produced: UNKNOWN — needs a decision on the Phase 6 telemetry classifier"
-        ),
+        "telemetry": tel,
     }
 
 
-def d113_inputs(ft: Fit, m: PR.ProbeModel, kept: dict, pool_path: str) -> dict:
-    return {
+def d113_inputs(
+    ft: Fit, m: PR.ProbeModel, kept: dict, pool_path: str, tel: dict | None = None
+) -> dict:
+    out = {
         "probes": {
             "k": m.k,
             "sigma": dict(zip(m.names, m.sigma, strict=True)),
@@ -253,6 +346,9 @@ def d113_inputs(ft: Fit, m: PR.ProbeModel, kept: dict, pool_path: str) -> dict:
         },
         "_kept_frozen_k": kept,
     }
+    if tel is not None and tel["replace"]:
+        out["telemetry"] = {"crossblock_counts": tel["matrix"]}  # D117
+    return out
 
 
 def write_pool(ft: Fit, path: Path) -> None:

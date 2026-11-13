@@ -93,10 +93,12 @@ def run_probe(
         rec["value"] = mem_value(read("/proc/meminfo"))
     elif name == "tel":
         snap = lambda: {f: read(f"/proc/{f}") for f in ("stat", "meminfo", "vmstat")}  # noqa: E731
-        first = snap()
+        ta, first = clock(), snap()
         sleep(float(cfg["probe_params"]["tel_seconds"]))
+        tb, second = clock(), snap()
         rec["value"] = None
-        rec["snapshots"] = [first, snap()]
+        rec["snapshots"] = [first, second]
+        rec["snapshot_t"] = [ta, tb]  # D117: rates use the time between the two snapshots
     else:
         raise ValueError(f"unknown probe {name!r}")
     rec["t_start"], rec["t_stop"] = t0, clock()

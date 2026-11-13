@@ -31,6 +31,31 @@ def mean_log_x(anomaly, intensity, probe):
     return CFG["probes"]["k"][c][probe] * math.log(S_TRUE[(anomaly, intensity)])
 
 
+# D117 synthetic telemetry: per-second rates per class; hA also has a per-core line (dropped by intersection)
+TEL_RATES = {
+    "h0": {"user": 100, "ctxt": 2000, "avail": 0, "pgfault": 1000, "numa": 1e5},
+    "cpu": {"user": 400, "ctxt": 2000, "avail": 0, "pgfault": 1000, "numa": 1e5},
+    "cache": {"user": 150, "ctxt": 5000, "avail": 0, "pgfault": 1000, "numa": 1e5},
+    "mbw": {"user": 150, "ctxt": 2000, "avail": 0, "pgfault": 1000, "numa": 1e6},
+    "mem": {"user": 100, "ctxt": 2000, "avail": -1e5, "pgfault": 2e4, "numa": 1e5},
+}
+
+
+def tel_snaps(rng, cls, host, shift=0.0, dt=60.0):
+    r = {k: v * (1 + 0.05 * rng.normal()) * (1 + shift) for k, v in TEL_RATES[cls].items()}
+    a = {"user": 1e7, "ctxt": 5e8, "avail": 3e7, "pgfault": 1e9, "numa": 1e10}
+    b = {k: a[k] + r[k] * dt for k in a}
+
+    def snap(v):
+        stat = f"cpu  {int(v['user'])} 0 500 900000\nctxt {int(v['ctxt'])}\n"
+        if host == "hA":
+            stat += f"cpu0 {int(v['user'])} 0 1 2\n"
+        return {"stat": stat, "meminfo": f"MemTotal: 65536000 kB\nMemAvailable: {int(v['avail'])} kB\n",
+                "vmstat": f"pgfault {int(v['pgfault'])}\nnuma_hit {int(v['numa'])}\n"}  # fmt: skip
+
+    return [snap(a), snap(b)]
+
+
 def synth(seed=0, n_healthy=200, reps=4, days=3, test_shift=0.0):
     """Synthetic JSONL rows; test_shift adds a large offset to every test-day value (leak check)."""
     rng = np.random.default_rng(seed)
@@ -46,6 +71,9 @@ def synth(seed=0, n_healthy=200, reps=4, days=3, test_shift=0.0):
                     rows.append({"event": "probe", "session": f"s{d}", "host": h, "condition": "healthy",
                                  "block": b, "probe": a, "value": v, "t_start": t,
                                  "t_stop": t + COST[a] * (1 + 0.01 * rng.normal())})  # fmt: skip
+                    if a == "tel":
+                        rows[-1]["snapshots"] = tel_snaps(rng, "h0", h, off)
+                        rows[-1]["snapshot_t"] = [t, t + 60.0]
                     t += COST[a]
             for (an, i), s in S_TRUE.items():
                 for r in range(reps):
@@ -58,6 +86,11 @@ def synth(seed=0, n_healthy=200, reps=4, days=3, test_shift=0.0):
                                      "anomaly": an, "intensity": i, "rep": r, "probe": a, "value": v,
                                      "t_start": t, "t_stop": t + COST[a]})  # fmt: skip
                         t += COST[a]
+                    rows.append({"event": "probe", "session": f"s{d}", "host": h, "condition": "anomaly",
+                                 "anomaly": an, "intensity": i, "rep": r, "probe": "tel", "value": None,
+                                 "t_start": t, "t_stop": t + 60.0, "snapshot_t": [t, t + 60.0],
+                                 "snapshots": tel_snaps(rng, AN.CAUSE_OF[an], h, off)})  # fmt: skip
+                    t += 60.0
                     for cond, ss in (("anomaly", s), ("healthy", 1.0)):
                         sec = 60.0 * ss * math.exp(rng.normal(0, 0.01))
                         rows.append({"event": "benchmark", "session": f"s{d}", "host": h, "condition": cond,
@@ -135,7 +168,9 @@ def test_held_out_accuracy_and_gate6(fitted):
     assert g["completeness"]["hosts_ge_2"] and g["completeness"]["days_ge_3"]
     assert g["completeness"]["healthy_runs_per_probe_ge_1000"] is False  # 800 < 1000
     assert g["completeness"]["reps_per_anomaly_intensity_ge_10"] is True  # 2 x 3 x 4 = 24
-    assert "UNKNOWN" in g["telemetry_counts"]
+    assert g["telemetry"] is None  # not passed here; D117 tests below
+    tel = AN.telemetry(df, ft, RF, seed=0)
+    assert AN.gate6(df, ft, ho, (1.1, 3.0), tel=tel)["telemetry"]["replace"] is True
 
 
 def test_outputs_feed_the_d113_plumbing(fitted, tmp_path):
@@ -191,3 +226,71 @@ def test_cli_on_synthetic_logs(tmp_path):
     assert set(d["probes"]) == {"k", "sigma", "cost_s", "mem_fixed_shift", "healthy_pool"}
     g = json.loads((tmp_path / "out" / "gate6.json").read_text())
     assert g["s_phase3_range"] == [1.1, 3.0]
+
+
+# ------------------------------------------------------------------ D117 telemetry classifier
+
+RF = CFG["antarex"]["rf"]
+
+
+def test_tel_features_by_hand():
+    a = {
+        "stat": "cpu  100 0 50 1000\nctxt 600\n",
+        "meminfo": "MemAvailable: 9000 kB\n",
+        "vmstat": "pgfault 10\n",
+    }
+    b = {
+        "stat": "cpu  160 0 50 1060\nctxt 1200\n",
+        "meminfo": "MemAvailable: 8400 kB\n",
+        "vmstat": "pgfault 70\n",
+    }
+    f = AN.tel_features([a, b], 60.0)
+    assert f == {"stat.cpu.0": 1.0, "stat.cpu.1": 0.0, "stat.cpu.2": 0.0, "stat.cpu.3": 1.0,
+                 "stat.ctxt.0": 10.0, "meminfo.MemAvailable": -10.0, "vmstat.pgfault": 1.0}  # fmt: skip
+
+
+def test_tel_confusion_replaces_when_every_class_has_30(fitted):
+    df, ft = fitted
+    tel = AN.telemetry(df, ft, RF, seed=0)
+    assert tel["labels"] == ["h0", "cpu", "cache", "mbw", "mem"]
+    n = tel["n_per_class"]
+    assert n == {"h0": 800, "cpu": 32, "cache": 32, "mbw": 32, "mem": 32}  # fit days only
+    m = np.array(tel["matrix"])
+    assert m.shape == (5, 5) and m.sum() == sum(n.values())
+    assert np.trace(m) / m.sum() > 0.9
+    assert tel["replace"] is True
+    assert not any(f.startswith("stat.cpu0") for f in tel["features"])  # only on one host
+
+
+def test_tel_test_days_never_used(tmp_path):
+    a = AN.telemetry(*_df_fit(tmp_path, "a.jsonl", 0.0), RF, seed=0)
+    b = AN.telemetry(*_df_fit(tmp_path, "b.jsonl", 3.0), RF, seed=0)
+    assert a["matrix"] == b["matrix"] and a["n_per_class"] == b["n_per_class"]
+
+
+def _df_fit(tmp_path, name, shift):
+    df = frame(synth(seed=2, n_healthy=40, reps=4, test_shift=shift), tmp_path, name)
+    return df, AN.fit(df, n_boot=20)
+
+
+def test_tel_keeps_frozen_when_a_class_is_small(tmp_path):
+    df = frame(synth(seed=3, n_healthy=40, reps=1), tmp_path)
+    ft = AN.fit(df, n_boot=20)
+    tel = AN.telemetry(df, ft, RF, seed=0)
+    assert tel["replace"] is False and "fewer than 30" in tel["reason"]
+    assert np.array(tel["matrix"]).sum() == sum(tel["n_per_class"].values())  # still reported
+
+
+def test_d113_inputs_carry_telemetry_only_when_replaced(fitted, tmp_path):
+    from hpcdiag.freeze import allowed_change, changed_keys
+
+    df, ft = fitted
+    m, kept = AN.model_from_fit(ft, CFG["probes"])
+    tel = AN.telemetry(df, ft, RF, seed=0)
+    d = AN.d113_inputs(ft, m, kept, "p.csv", tel)
+    assert d["telemetry"]["crossblock_counts"] == tel["matrix"]
+    new = copy.deepcopy(CFG)
+    new["probes"].update(d["probes"])
+    new["telemetry"].update(d["telemetry"])
+    assert all(allowed_change(k) for k in changed_keys(CFG, new))
+    assert "telemetry" not in AN.d113_inputs(ft, m, kept, "p.csv", {**tel, "replace": False})
