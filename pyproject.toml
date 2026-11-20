@@ -50,3 +50,4 @@ dev = [
 "cluster/*.py" = ["E501"]
 "tests/test_cluster_kit.py" = ["E501"]
 "tests/test_phase6_analysis.py" = ["E501"]  # synthetic log rows
+"scripts/export_components.py" = ["E501"]  # export tables, long lines
