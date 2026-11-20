@@ -168,7 +168,7 @@ A gradient-boosted quantile model (LightGBM~\cite{lightgbm}, $\tau = 0.9$, 200 t
 \begin{equation}
 S_j = \log T_j - \hat q(x_j).
 \end{equation}
-A larger $S_j$ means the job took longer than predicted. The scores passed to Layer~2 are additionally \emph{centred}: the median score of the same user's jobs of the same shape that ended in the previous 7 days (at least 3 jobs; otherwise the same user's jobs) is subtracted, which removes persistent user habits. The reference set $R_j$ holds the scores of all jobs that ended in the 7 days before job $j$ (at least 30 jobs). With a uniform random tie-breaker $\theta_j$,
+A larger $S_j$ means the job took longer than predicted. The scores passed to Layer~2 are additionally \emph{centred}: the median score of the same user's jobs of the same shape that ended in the previous 7 days (if there are at least 3 such jobs; otherwise the median of the same user's jobs, again if there are at least 3; otherwise the score is left uncentred) is subtracted, which removes persistent user habits. The reference set $R_j$ holds the scores of all jobs that ended in the 7 days before job $j$ (at least 30 jobs). With a uniform random tie-breaker $\theta_j$,
 \begin{equation}
 p_j = \frac{\#\{i \in R_j : S_i > S_j\} + \theta_j\,\bigl(1 + \#\{i \in R_j : S_i = S_j\}\bigr)}{|R_j| + 1}.
 \end{equation}

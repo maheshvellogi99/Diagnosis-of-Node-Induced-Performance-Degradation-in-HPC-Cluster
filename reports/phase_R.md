@@ -129,3 +129,4 @@ The architect revised the report, and the revision is accepted (D126):
   does not say that the user level also needs at least 3 jobs. Below that, the score is left uncentred
   (`src/hpcdiag/layer2/centred.py`, level 2).
 - **Deliverables.** `deliverables/` was rebuilt, and its README now says the PDF matches the .tex.
+- 20 Nov 2026: the architect fixed the centring sentence (user-level fallback also needs at least 3 jobs, otherwise uncentred; matches `centred.py`) and rebuilt the PDF; the .tex is committed, and `deliverables/report/` already holds identical copies (not rebuilt).
