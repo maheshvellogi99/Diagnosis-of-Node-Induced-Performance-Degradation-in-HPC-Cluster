@@ -41,7 +41,7 @@
 % ---------- layer 1 ----------
 \node[l1] (enc)  at (\xB,-0.8) {Feature encoder};
 \node[l1] (qm)   at (\xB,-2.2) {Quantile regression\\(LightGBM, $\tau{=}0.9$)};
-\node[l1] (sc)   at (\xB,-3.6) {Nonconformity score\\$S_j=\log T_j-\hat q(x_j)$};
+\node[l1] (sc)   at (\xB,-3.6) {Nonconformity score\\$S_j=\log T_j-\hat q(x_j)$,\\centred per user and job shape};
 \node[store, minimum width=26mm] (ref) at (\xB,-5.15) {Reference scores\\(last 7 days)};
 \node[l1] (cp)   at (\xB,-6.7) {Conformal p-value\\calculator};
 \draw[flow] (feat0.north east) -- node[lab, above, sloped]{$x_j$} (enc.west);

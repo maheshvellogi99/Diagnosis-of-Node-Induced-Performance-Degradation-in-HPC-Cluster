@@ -168,7 +168,7 @@ A gradient-boosted quantile model (LightGBM~\cite{lightgbm}, $\tau = 0.9$, 200 t
 \begin{equation}
 S_j = \log T_j - \hat q(x_j).
 \end{equation}
-A larger $S_j$ means the job took longer than predicted. The reference set $R_j$ holds the scores of all jobs that ended in the 7 days before job $j$ (at least 30 jobs). With a uniform random tie-breaker $\theta_j$,
+A larger $S_j$ means the job took longer than predicted. The scores passed to Layer~2 are additionally \emph{centred}: the median score of the same user's jobs of the same shape that ended in the previous 7 days (at least 3 jobs; otherwise the same user's jobs) is subtracted, which removes persistent user habits. The reference set $R_j$ holds the scores of all jobs that ended in the 7 days before job $j$ (at least 30 jobs). With a uniform random tie-breaker $\theta_j$,
 \begin{equation}
 p_j = \frac{\#\{i \in R_j : S_i > S_j\} + \theta_j\,\bigl(1 + \#\{i \in R_j : S_i = S_j\}\bigr)}{|R_j| + 1}.
 \end{equation}
@@ -256,7 +256,7 @@ Phase & Work & Gate result \\
 All results below are on development data. Layer~3 results use the assumed probe model.
 
 \subsection{Layer 1: runtime model and p-values}
-Table~\ref{tab:l1pred} evaluates the frozen model on the 102{,}120 PM100 jobs that ended after the freeze date. The median model predicts runtime roughly twice as well as simple baselines, but runtime prediction from submission data remains hard: only 37.2\% of predictions are within a factor of two. This does not affect the false-alarm guarantee, which comes from the conformal step (Table~\ref{tab:l1cal}).
+Table~\ref{tab:l1pred} evaluates the frozen model on the 102{,}120 PM100 jobs that ended after the freeze date. The median model has the most predictions within a factor of two (37.2\% against 25.2\% for a constant median and 18.6\% for the requested walltime) and the lowest RMSE and the highest $R^2$. It is not better on every measure: the constant median has a lower MAE (2.55\,h against 2.78\,h), and the requested walltime ranks jobs slightly better (Spearman 0.53 against 0.49). Runtime prediction from submission data remains hard. This does not affect the false-alarm guarantee, which comes from the conformal step (Table~\ref{tab:l1cal}).
 
 \begin{table}[H]
 \centering
@@ -435,11 +435,11 @@ Gate & Criterion & Measured & Result\\
 % ------------------------------------------------------------------ 10
 \section{Discussion and Limitations}
 \begin{itemize}
-\item \textbf{Guarantees held in every development experiment.} No configuration exceeded the false-alarm bound, including decoys designed to mimic node faults.
+\item \textbf{The final design kept its false-alarm bound in every development experiment,} including decoys designed to mimic node faults. Earlier designs did not: the mid-review weighted e-value flagged a healthy node in 98.5\% of real-stream null scenarios (Section~\ref{sec:changes}), which is why it was replaced.
 \item \textbf{Logs alone are slow.} Without probes, 11.5\% of degraded nodes are flagged within 14 days. This is a property of the information available, not of the method; probing a tiny fraction of cluster time solves it.
 \item \textbf{Very small slowdowns.} At $s = 1.1$ at most 18\% are flagged within 14 days, although recall by the end of the trace reaches 0.73 at $B = 7{,}200$.
 \item \textbf{Simulated probes.} Layer~3 speed and accuracy depend on probe noise and effect sizes that are assumed, not yet measured.
-\item \textbf{Random placement.} The exactness of the relative e-value requires that jobs are not placed on nodes by identity. On the real placement of PM100, four nodes flagged by Layer~2 were each dominated by one user; we make no claim about them.
+\item \textbf{Random placement.} The exactness of the relative e-value requires that jobs are not placed on nodes by identity. On the real placement of PM100, four nodes flagged by Layer~2 ran an unusually large share of their jobs for a single user (7--12 users per node, top-user share above the 90th percentile of all nodes), which may break this assumption; we make no claim about them.
 \item \textbf{One system.} Layers 1--2 are evaluated on one trace; Eagle has no node lists.
 \end{itemize}
 
@@ -453,7 +453,7 @@ Gate & Criterion & Measured & Result\\
 
 % ------------------------------------------------------------------ 12
 \section{Conclusion}
-This project reframes node-degradation diagnosis in shared HPC clusters as a statistically controlled, cost-aware decision process, and implements it end to end. Layer~1 turns scheduler logs into calibrated job-level evidence; Layer~2 screens 980 nodes with a false-alarm bound that held in every experiment, including bursts and decoys that defeat threshold rules; Layer~3 adds a small budget of targeted probes that raises detection within 14 days from 11.5\% to 98.5\% and identifies the cause in 99.1\% of cases on development data. The main open question is how well these simulated Layer~3 results carry over to measured probe behaviour, which the prepared hardware campaign will answer.
+This project reframes node-degradation diagnosis in shared HPC clusters as a statistically controlled, cost-aware decision process, and implements it end to end. Layer~1 turns scheduler logs into calibrated job-level evidence; Layer~2 screens 980 nodes with a false-alarm bound that the final design kept in every development experiment, including bursts and decoys that defeat threshold rules; Layer~3 adds a small budget of targeted probes that raises detection within 14 days from 11.5\% to 98.5\% and identifies the cause in 99.1\% of cases on development data. The main open question is how well these simulated Layer~3 results carry over to measured probe behaviour, which the prepared hardware campaign will answer.
 
 % ------------------------------------------------------------------ refs
 \renewcommand{\refname}{References}

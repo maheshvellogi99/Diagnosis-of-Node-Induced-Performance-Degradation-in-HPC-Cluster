@@ -111,3 +111,21 @@ uv run python scripts/build_deliverables.py
 uv run python scripts/check_frozen.py --config configs/phase5.yaml --policy ig_d109
 uv run pytest -q
 ```
+
+## Addendum (D126, 20 Nov 2026)
+
+The architect revised the report, and the revision is accepted (D126):
+- **Wording.** `G34_Final_Report.tex` was reworded for D124 items 1–3: the baseline comparison now states
+  the MAE and Spearman exceptions; the false-alarm claim is limited to the final design and mentions the
+  98.5% failure of the mid-review form; the four real-placement nodes are described as in D92.
+- **Centred score.** The centred score is now described in the Layer 1 section and in the
+  `architecture_fig.tex` score box.
+- **Rebuilt files.** `Project Report.pdf`, `architecture.png` and `architecture_standalone.pdf` were rebuilt
+  by the architect, so the PDF now matches the .tex. I did not rebuild or inspect the PDF here.
+- **Numbers checked.** I checked the numbers added in the new wording (37.2%, 25.2%, 18.6%, 2.55 h,
+  2.78 h, 0.53, 0.49, 98.5%, 7–12 users, 90th percentile, at least 3 jobs). All match FINAL_RESULTS, D92
+  and `configs/phase4_layer2.yaml`.
+- **One small omission (not a number, left unchanged).** "at least 3 jobs; otherwise the same user's jobs"
+  does not say that the user level also needs at least 3 jobs. Below that, the score is left uncentred
+  (`src/hpcdiag/layer2/centred.py`, level 2).
+- **Deliverables.** `deliverables/` was rebuilt, and its README now says the PDF matches the .tex.

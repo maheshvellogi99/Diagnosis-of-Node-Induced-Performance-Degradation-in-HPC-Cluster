@@ -45,7 +45,7 @@ Built by `scripts/build_deliverables.py` from git commit {commit}. Nothing here 
 
 | Folder / file | What |
 |---|---|
-| `report/` | Final report source (`G34_Final_Report.tex`, `architecture_fig.tex`, logo). `Project Report.pdf` is the PDF **as received from the architect; it was NOT rebuilt** after the D124 number fixes (no offline LaTeX on the build machine), so where it differs from the .tex, the .tex is correct. The list of fixes is in `reports/phase_R.md`. |
+| `report/` | Final report source (`G34_Final_Report.tex`, `architecture_fig.tex`, logo). `Project Report.pdf` matches the .tex: rebuilt by the architect on 20 Nov 2026 with the D124 fixes (D126). The list of fixes is in `reports/phase_R.md`. |
 | `architecture/` | Architecture figure (`architecture.png`, `architecture_standalone.pdf`) |
 | `FINAL_RESULTS.md` | Every result with its run id |
 | `reports/` | Phase reports 0 to R, with `figures/` |
