@@ -117,12 +117,14 @@ def telemetry_rf(out: Path, cfg: dict, log) -> dict:
     rf = RandomForestClassifier(n_estimators=rc["n_estimators"], class_weight=rc["class_weight"],
                                 n_jobs=rc["n_jobs"], random_state=seed)  # fmt: skip
     rf.fit(X[main], y)
-    joblib.dump({"model": rf, "feature_names": list(names), "classes": list(rf.classes_),
+    cols = [f"{m}|{s}" for m in names for s in CL.STAT_NAMES]  # column order of window_stats
+    assert len(cols) == X.shape[1], (len(cols), X.shape)
+    joblib.dump({"model": rf, "feature_names": cols, "metric_names": list(names), "stat_names": list(CL.STAT_NAMES), "classes": list(rf.classes_),
                  "class_map": CL.CLASS_MAP, "fit_on": "all 5-class Antarex windows (mono + multi)",
                  "scored_on_held_out": False}, out / "telemetry_rf_antarex.joblib")  # fmt: skip
     for r in CLF_RUNS:
         shutil.copy(resolve(f"runs/phase5/{r}/metrics.json"), out / f"metrics_{r}.json")
-    return {"windows": int(main.sum()), "features": len(names)}
+    return {"windows": int(main.sum()), "metrics": len(names), "features": int(X.shape[1])}
 
 
 def _run(run: Run, out: Path) -> int:
