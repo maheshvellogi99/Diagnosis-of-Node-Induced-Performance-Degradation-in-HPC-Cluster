@@ -1,0 +1,97 @@
+% System architecture figure (TikZ). \input{architecture_fig} inside a figure environment,
+% or compile architecture_standalone.tex for a PDF/PNG.
+\begin{tikzpicture}[
+  font=\sffamily\scriptsize,
+  >={Stealth[length=2.2mm]},
+  blk/.style={draw=black!70, rounded corners=2pt, align=center, minimum width=31mm,
+              minimum height=8.5mm, inner sep=2pt, line width=0.5pt},
+  l1/.style={blk, fill=blue!10},
+  l2/.style={blk, fill=violet!12},
+  l3/.style={blk, fill=orange!14},
+  io/.style={blk, fill=black!8},
+  store/.style={draw=black!70, cylinder, shape border rotate=90, aspect=0.18, align=center,
+                minimum width=24mm, minimum height=10mm, fill=black!5, inner sep=1pt, line width=0.5pt},
+  flow/.style={->, line width=0.6pt},
+  lab/.style={font=\sffamily\tiny, inner sep=1pt, fill=white, text=black!80},
+  head/.style={font=\sffamily\bfseries\small},
+  sub/.style={font=\sffamily\tiny, text=black!60}
+]
+% ---------- column x positions ----------
+\def\xA{0}\def\xB{4.6}\def\xC{9.2}\def\xD{13.8}
+
+% ---------- headings ----------
+\node[head] at (\xA,0.9) {Input};
+\node[head] at (\xB,0.9) {Layer 1: Job Evidence};
+\node[sub]  at (\xB,0.5) {Is this job late?};
+\node[head] at (\xC,0.9) {Layer 2: Node Screening};
+\node[sub]  at (\xC,0.5) {Which node is responsible?};
+\node[head] at (\xD,0.9) {Layer 3: Root-Cause Diagnosis};
+\node[sub]  at (\xD,0.5) {What is wrong with it?};
+
+% ---------- separators ----------
+\foreach \x in {2.3,6.9,11.5} \draw[black!35, dashed] (\x,1.15) -- (\x,-9.0);
+
+% ---------- input ----------
+\node[store] (logs) at (\xA,-0.8) {Scheduler\\accounting logs};
+\node[io, minimum width=26mm] (feat0) at (\xA,-2.6) {Job records\\(request, user,\\runtime)};
+\node[io, minimum width=26mm] (alloc) at (\xA,-5.6) {Job--node\\allocation map};
+\draw[flow] (logs) -- (feat0);
+\draw[flow] (logs.west) -- ++(-0.25,0) |- (alloc.west);
+
+% ---------- layer 1 ----------
+\node[l1] (enc)  at (\xB,-0.8) {Feature encoder};
+\node[l1] (qm)   at (\xB,-2.2) {Quantile regression\\(LightGBM, $\tau{=}0.9$)};
+\node[l1] (sc)   at (\xB,-3.6) {Nonconformity score\\$S_j=\log T_j-\hat q(x_j)$};
+\node[store, minimum width=26mm] (ref) at (\xB,-5.15) {Reference scores\\(last 7 days)};
+\node[l1] (cp)   at (\xB,-6.7) {Conformal p-value\\calculator};
+\draw[flow] (feat0.north east) -- node[lab, above, sloped]{$x_j$} (enc.west);
+\draw[flow] (enc) -- node[lab, right]{features} (qm);
+\draw[flow] (qm) -- node[lab, right]{$\hat q(x_j)$} (sc);
+\draw[flow] (feat0.east) -- node[lab, above, pos=0.45]{$T_j$} (sc.west);
+\draw[flow] ($(sc.south)+(-1.42,0)$) -- node[lab, left]{$S_j$} ($(cp.north)+(-1.42,0)$);
+\draw[flow] (sc) -- node[lab, right]{store} (ref);
+\draw[flow] (ref) -- (cp);
+
+% ---------- layer 2 ----------
+\node[l2] (bet)  at (\xC,-0.8) {Bet function $g(p)$};
+\node[l2] (rel)  at (\xC,-2.2) {Relative e-value\\(per partition, 6 h block)};
+\node[l2] (ep)   at (\xC,-3.6) {Node e-process store\\$M_n$};
+\node[l2] (ebh)  at (\xC,-5.15) {e-BH selector\\($\alpha=0.1$, 980 nodes)};
+\node[l2] (rank) at (\xC,-6.7) {Suspect ranking\\and flagged nodes};
+\draw[flow] (cp.east) -- ++(0.45,0) |- node[lab, above, pos=0.8]{$p_j$} (bet.west);
+\draw[flow] (alloc.south) -- ++(0,-1.85) -| node[lab, above, pos=0.25]{node list $\mathcal N_j$ of each job} ($(rel.west)+(-0.35,-0.15)$) -- ($(rel.west)+(0,-0.15)$);
+\draw[flow] (bet) -- node[lab, right]{$a_{n,b}$} (rel);
+\draw[flow] (rel) -- node[lab, right]{$e_{n,b}$} (ep);
+\draw[flow] (ep) -- node[lab, right]{$E_n$} (ebh);
+\draw[flow] (ebh) -- (rank);
+
+% ---------- layer 3 ----------
+\node[l3] (sched) at (\xD,-0.8) {Probe scheduler\\(info.\ gain per second,\\budget $B$ node-s/day)};
+\node[l3] (lib)   at (\xD,-2.2) {Probe library\\(CPU, STREAM, cache,\\memory, telemetry)};
+\node[io, minimum width=31mm] (node) at (\xD,-3.6) {Suspect compute node};
+\node[l3, minimum width=27mm] (pe)    at (\xD,-5.15) {Probe e-value\\(conformal p-value,\\restart mixture)};
+\node[store, minimum width=16mm] (pool) at (\xD+2.55,-5.15) {Healthy\\probe\\pool};
+\node[l3] (bayes) at (\xD,-6.7) {Bayesian cause estimator\\(+ telemetry classifier)};
+\draw[flow] (rank.east) -- ++(0.45,0) |- node[lab, above, pos=0.78]{suspects} (sched.west);
+\draw[flow] (sched) -- node[lab, right]{probe $a$} (lib);
+\draw[flow] (lib) -- node[lab, right]{run} (node);
+\draw[flow] (node) -- node[lab, right]{outcome $x$} (pe);
+\draw[flow] (pool) -- (pe);
+\draw[flow] (pe) -- node[lab, right]{likelihood} (bayes);
+\draw[flow] (bayes.east) -- ++(2.05,0) |- node[lab, sloped, above, pos=0.3]{posterior $\pi$ (next probe)} (sched.east);
+% feedback of probe evidence to layer 2
+\draw[flow, dashed] (pe.west) -- node[lab, sloped, above, pos=0.5]{probe evidence $P_n$} (ep.east);
+
+% ---------- output ----------
+\node[io, minimum width=40mm, fill=green!10] (out) at (\xD,-8.4) {\textbf{Diagnosis report}\\node, cause, confidence, probe cost};
+\draw[flow] (bayes) -- node[lab, right]{$\max_h \pi(h)\ge 0.95$} (bayes |- out.north);
+
+% ---------- guarantees strip ----------
+\node[font=\sffamily\tiny, text=black!70, align=center] at (\xB,-8.4) {Guarantee: $P(p_j\le\alpha)\le\alpha$\\for normal jobs};
+\node[font=\sffamily\tiny, text=black!70, align=center] at (\xC,-8.4) {Guarantee: $P(\text{any false flag ever})\le\alpha$\\when all nodes are healthy};
+
+% ---------- evaluation ----------
+\node[draw=black!50, dashed, rounded corners=2pt, fill=yellow!6, minimum width=172mm, minimum height=6mm,
+      align=center, font=\sffamily\scriptsize] (ev) at (6.9,-9.6)
+  {Ground truth for evaluation: semi-synthetic fault injection into PM100 job traces (done)\quad$\cdot$\quad HPAS fault injection on dedicated x86-64 machines (pending)};
+\end{tikzpicture}
