@@ -16,3 +16,5 @@ hpc_claude_code_complete_conversation*.txt
 cluster/bin/
 cluster/third_party/
 cluster/logs/
+# Phase R: Google-Drive package, rebuilt by scripts (D125)
+deliverables/
