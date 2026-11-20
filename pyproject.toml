@@ -52,3 +52,4 @@ dev = [
 "tests/test_phase6_analysis.py" = ["E501"]  # synthetic log rows
 "scripts/export_components.py" = ["E501"]  # export tables, long lines
 "scripts/demo_pipeline.py" = ["E501"]  # output tables, long lines
+"scripts/build_deliverables.py" = ["E501"]  # README text
