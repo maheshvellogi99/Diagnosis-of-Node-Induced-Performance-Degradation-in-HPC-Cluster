@@ -11,7 +11,7 @@ Phase R runs (20 Nov 2026, this document):
 | Run | Command | What |
 |---|---|---|
 | 20261120-191921-layer1-export | `uv run python scripts/export_layer1.py --config configs/phase2_conformal.yaml --ref 20261010-003334-pm100-E-main-full --out deliverables/models/layer1` | Re-fit of the frozen Layer 1 models; max \|diff\| to the frozen q_hat and q50_log 0.0 on 102,120 jobs (also after reloading the text files) |
-| 20261120-192023-components | `uv run python scripts/export_components.py --config configs/phase5.yaml --out deliverables/models` | Layer 2/3 tables and the telemetry random forest |
+| 20261120-193043-components | `uv run python scripts/export_components.py --config configs/phase5.yaml --out deliverables/models` | Layer 2/3 tables and the telemetry random forest (replaces 20261120-192023-components, whose joblib stored 244 metric names instead of the 2,684 column names) |
 | 20261120-192256-demo | `uv run python scripts/demo_pipeline.py --config configs/phase5.yaml --scenario node__rand00__K1__s1.3__seed00 --budget 7200 --ref 20261113-223241-dev5c --out deliverables/demo` | End-to-end demo; identical to the dev5c row |
 | 20261120-192518-final-l1 | `uv run python scripts/final_layer1_metrics.py --config configs/phase2_conformal.yaml --ref 20261010-003334-pm100-E-main-full --l2-config configs/phase4_layer2.yaml` | Layer 1 accuracy and calibration in section 1 |
 
