@@ -15,7 +15,7 @@ held:
 | D122 | `scripts/demo_pipeline.py` on `node__rand00__K1__s1.3__seed00`, B 7200 → `deliverables/demo/`. 10/10 degraded nodes flagged within 14 d; median delay 4.83 d; 0 false nodes; 10/10 causes correct; 11,001 investigations. | Run 20261120-192256-demo: **9.2 s**; result identical to the dev5c row of run 20261113-223241-dev5c (all fields except timings) |
 | D123 | `reports/FINAL_RESULTS.md`, every number with its run id, labelled "development seeds; sealed evaluation pending". New Layer 1 numbers (baselines, S_c calibration) come from run 20261120-192518-final-l1. The Prodigy binary score 0.970 ± 0.015 is sourced "mid-review report (Table 2), Sep 2026; not re-run in this repo". | — |
 | D124 | 8 number fixes in `G34_Final_Report.tex` (table below). No number changes in `architecture_fig.tex`. Claims I think are wrong but are not numbers were left unchanged and are listed for you. **PDF not rebuilt.** | Commits c5dab7e (as received) and d69895c (fixes): `git diff c5dab7e d69895c` |
-| D125 | `deliverables/` built by `scripts/build_deliverables.py`, git-ignored: **62 files, 23M** (`du -sh deliverables`). No raw data and no parquet file. | — |
+| D125 | `deliverables/` built by `scripts/build_deliverables.py`, git-ignored: **63 files, 23M** (`du -sh deliverables`). No raw data and no parquet file. | — |
 
 ## D124 — changes to `Claude outputs/report/G34_Final_Report.tex`
 
